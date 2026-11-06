@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f7fb">
+    <title>บัญชีรายรับรายจ่าย</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="หน้าหลัก">
+          <span class="brand-mark" aria-hidden="true">฿</span>
+          <span>บันทึก<span class="brand-accent">ทุกบาท</span></span>
+        </a>
+        <div id="account-bar" class="account-bar" hidden>
+          <span id="user-email" class="user-email"></span>
+          <button id="sign-out-button" class="button button-quiet" type="button">ออกจากระบบ</button>
+        </div>
+      </header>
+
+      <section id="auth-view" class="auth-layout">
+        <div class="intro">
+          <p class="eyebrow">จัดการเงินให้ง่ายขึ้น</p>
+          <h1>ทุกเดือน<br>เห็นภาพการเงินชัดเจน</h1>
+          <p class="intro-copy">บันทึกรายรับและรายจ่ายของคุณ ดูยอดรวมประจำเดือน และติดตามทุกการใช้จ่ายได้ในที่เดียว</p>
+          <div class="intro-points">
+            <span><span class="check">✓</span> ข้อมูลส่วนตัวของคุณ</span>
+            <span><span class="check">✓</span> ดูย้อนหลังแยกตามเดือน</span>
+          </div>
+        </div>
+
+        <form id="auth-form" class="card auth-card">
+          <div class="card-heading">
+            <p class="eyebrow">ยินดีต้อนรับ</p>
+            <h2 id="auth-title">เข้าสู่ระบบ</h2>
+            <p id="auth-description" class="muted">เข้าสู่ระบบเพื่อจัดการบัญชีของคุณ</p>
+          </div>
+          <label class="field-label" for="auth-email">อีเมล</label>
+          <input id="auth-email" class="input" type="email" autocomplete="email" placeholder="you@example.com" required>
+          <label class="field-label" for="auth-password">รหัสผ่าน</label>
+          <input id="auth-password" class="input" type="password" autocomplete="current-password" minlength="6" placeholder="อย่างน้อย 6 ตัวอักษร" required>
+          <button id="auth-submit" class="button button-primary button-full" type="submit">เข้าสู่ระบบ</button>
+          <p id="auth-message" class="form-message" role="status" aria-live="polite"></p>
+          <p class="auth-switch">
+            <span id="auth-switch-label">ยังไม่มีบัญชี?</span>
+            <button id="auth-switch-button" class="text-button" type="button">สมัครสมาชิก</button>
+          </p>
+        </form>
+      </section>
+
+      <section id="app-view" class="dashboard" hidden>
+        <div class="dashboard-heading">
+          <div>
+            <p class="eyebrow">ภาพรวมการเงิน</p>
+            <h1>บัญชีของฉัน</h1>
+          </div>
+          <label class="month-picker">
+            <span>เลือกเดือน</span>
+            <input id="month-picker" class="input" type="month">
+          </label>
+        </div>
+
+        <div class="summary-grid">
+          <article class="summary-card balance-card">
+            <div class="summary-label"><span class="summary-icon balance-icon">฿</span> คงเหลือสุทธิ</div>
+            <p id="balance-total" class="summary-amount">฿0.00</p>
+            <p class="balance-substat">เฉลี่ยคงเหลือต่อวัน <strong id="daily-average">฿0.00</strong></p>
+            <p id="today-delta" class="balance-delta">วันนี้เหลือ +฿0.00</p>
+            <p class="summary-hint">รายรับลบรายจ่าย</p>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label"><span class="summary-icon income-icon">↙</span> รายรับ</div>
+            <p id="income-total" class="summary-amount income-text">฿0.00</p>
+            <p class="summary-hint">รวมรายรับเดือนนี้</p>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label"><span class="summary-icon expense-icon">↗</span> รายจ่าย</div>
+            <p id="expense-total" class="summary-amount expense-text">฿0.00</p>
+            <p class="summary-hint">รวมรายจ่ายเดือนนี้</p>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label"><span class="summary-icon expense-icon">!</span> รายจ่ายที่ยังไม่จ่าย</div>
+            <p id="unpaid-total" class="summary-amount expense-text">฿0.00</p>
+            <p class="summary-hint">รวมยอดค้างถึงสิ้นเดือนที่เลือก</p>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label"><span class="summary-icon income-icon">?</span> รายรับที่ยังไม่ได้รับ</div>
+            <p id="unreceived-total" class="summary-amount income-text">฿0.00</p>
+            <p class="summary-hint">รวมยอดรายรับประจำที่ยังค้าง</p>
+          </article>
+        </div>
+
+        <div class="content-grid">
+          <section class="card transaction-card">
+            <div class="section-heading">
+              <div>
+                <h2 id="form-title">เพิ่มรายการ</h2>
+                <p class="muted">กรอกรายละเอียดรายการของคุณ</p>
+              </div>
+            </div>
+            <form id="transaction-form">
+              <div class="type-toggle" role="group" aria-label="ประเภทรายการ">
+                <button class="type-button is-active" data-type="expense" type="button">รายจ่าย</button>
+                <button class="type-button" data-type="income" type="button">รายรับ</button>
+              </div>
+              <label class="field-label" for="amount">จำนวนเงิน (บาท)</label>
+              <div class="amount-wrap"><span>฿</span><input id="amount" class="input amount-input" type="number" min="0.01" step="0.01" placeholder="0.00" required></div>
+              <div class="form-row">
+                <div>
+                  <label class="field-label" for="category">หมวดหมู่</label>
+                  <select id="category" class="input" required></select>
+                </div>
+                <div>
+                  <label class="field-label" for="transaction-date">วันที่</label>
+                  <input id="transaction-date" class="input" type="date" required>
+                </div>
+              </div>
+              <label class="field-label" for="note">บันทึกเพิ่มเติม <span class="optional">(ไม่บังคับ)</span></label>
+              <input id="note" class="input" type="text" maxlength="160" placeholder="เช่น ซื้อกาแฟ">
+              <label class="recurring-check">
+                <input id="recurring-toggle" type="checkbox">
+                <span>ตั้งเป็นรายการประจำ</span>
+              </label>
+              <div id="recurring-options" class="recurring-options" hidden>
+                <label class="field-label" for="recurrence-frequency">ให้เกิดซ้ำ</label>
+                <select id="recurrence-frequency" class="input">
+                  <option value="monthly">ทุกเดือน</option>
+                  <option value="yearly">ทุกปี</option>
+                </select>
+                <p class="helper-text">ระบบจะสร้างยอดตามวันที่กำหนด รายการที่ยังไม่ติ๊กจ่ายจะแสดงเป็นยอดค้าง</p>
+              </div>
+              <p id="transaction-message" class="form-message" role="status" aria-live="polite"></p>
+              <div class="form-actions">
+                <button id="save-button" class="button button-primary" type="submit">บันทึกรายการ</button>
+                <button id="cancel-edit-button" class="button button-quiet" type="button" hidden>ยกเลิก</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="card history-card">
+            <div class="section-heading history-heading">
+              <div>
+                <h2>รายการของเดือนนี้</h2>
+                <p id="transaction-count" class="muted">0 รายการ</p>
+              </div>
+            </div>
+            <div id="transaction-list" class="transaction-list"></div>
+            <div id="empty-state" class="empty-state">
+              <span class="empty-icon" aria-hidden="true">☷</span>
+              <strong>ยังไม่มีรายการ</strong>
+              <span>เริ่มบันทึกรายรับหรือรายจ่ายของคุณได้เลย</span>
+            </div>
+          </section>
+        </div>
+
+        <section class="card recurring-card">
+          <div class="section-heading history-heading">
+            <div>
+              <h2>รายการประจำและยอดค้าง</h2>
+              <p class="muted">ติ๊กเมื่อชำระหรือได้รับเงินแล้ว รายการค้างจะแสดงจนกว่าจะปิดยอด</p>
+            </div>
+          </div>
+          <div id="recurring-list" class="recurring-list"></div>
+          <div id="recurring-empty" class="empty-state compact-empty">
+            <strong>ไม่มีรายการประจำหรือยอดค้างในช่วงนี้</strong>
+            <span>เพิ่มรายการประจำจากแบบฟอร์มด้านบนได้เลย</span>
+          </div>
+          <p id="recurring-message" class="form-message" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="card settings-card">
+          <div class="section-heading">
+            <h2>ปรับแต่งเว็บ</h2>
+            <p class="muted">การตั้งค่าเหล่านี้มีผลกับบัญชีของคุณเท่านั้น</p>
+          </div>
+          <div class="settings-grid">
+            <div class="preference-fields">
+              <label class="field-label" for="theme-select">ธีม</label>
+              <select id="theme-select" class="input">
+                <option value="light">สว่าง</option>
+                <option value="dark">มืด</option>
+              </select>
+              <label class="field-label" for="accent-color">สีหลักของเว็บ</label>
+              <div class="color-picker-row">
+                <input id="accent-color" type="color" value="#23876c" aria-label="เลือกสีหลัก">
+                <span>เลือกสีที่ต้องการใช้แทนสีเดิม</span>
+              </div>
+            </div>
+            <div class="category-settings">
+              <h3>หมวดหมู่ของฉัน</h3>
+              <p class="helper-text">แก้ชื่อหรือปิดใช้ได้ รายการเก่าจะคงชื่อเดิมไว้เพื่อไม่ให้ประวัติเปลี่ยนตาม</p>
+              <form id="category-form" class="category-form">
+                <select id="category-type" class="input" aria-label="ประเภทหมวดหมู่">
+                  <option value="expense">รายจ่าย</option>
+                  <option value="income">รายรับ</option>
+                </select>
+                <input id="new-category" class="input" type="text" maxlength="40" placeholder="ชื่อหมวดหมู่ใหม่" required>
+                <button class="button button-primary" type="submit">เพิ่ม</button>
+              </form>
+              <div class="category-columns">
+                <div>
+                  <h4>รายจ่าย</h4>
+                  <div id="expense-category-list" class="category-list"></div>
+                </div>
+                <div>
+                  <h4>รายรับ</h4>
+                  <div id="income-category-list" class="category-list"></div>
+                </div>
+              </div>
+              <p id="settings-message" class="form-message" role="status" aria-live="polite"></p>
+            </div>
+          </div>
+        </section>
+        <p class="privacy-note">ข้อมูลรายการของคุณถูกจัดเก็บแยกตามบัญชีผู้ใช้</p>
+      </section>
+    </main>
+  </body>
+</html>

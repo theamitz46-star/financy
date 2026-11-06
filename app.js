@@ -1,0 +1,808 @@
+// Add your Supabase project URL and anon/publishable key from Project Settings > API.
+const SUPABASE_URL = "https://spptwhuqufaeipxogpcz.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_4FN9deU7omFmSNwTjJ6kYQ_KbMxpCIN";
+const TABLE_NAME = "transactions";
+const DEFAULT_CATEGORIES = {
+  expense: ["อาหาร", "เดินทาง", "ที่อยู่อาศัย", "ของใช้", "สุขภาพ", "บันเทิง", "บิล/ค่าสาธารณูปโภค", "อื่น ๆ"],
+  income: ["เงินเดือน", "งานเสริม", "ลงทุน", "ของขวัญ", "คืนเงิน", "อื่น ๆ"],
+};
+const DEFAULT_ACCENT = "#23876c";
+const currency = new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB" });
+const dateFormatter = new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "short", year: "numeric" });
+
+const elements = {
+  authView: document.querySelector("#auth-view"),
+  appView: document.querySelector("#app-view"),
+  authForm: document.querySelector("#auth-form"),
+  authTitle: document.querySelector("#auth-title"),
+  authDescription: document.querySelector("#auth-description"),
+  authEmail: document.querySelector("#auth-email"),
+  authPassword: document.querySelector("#auth-password"),
+  authSubmit: document.querySelector("#auth-submit"),
+  authMessage: document.querySelector("#auth-message"),
+  authSwitchLabel: document.querySelector("#auth-switch-label"),
+  authSwitchButton: document.querySelector("#auth-switch-button"),
+  accountBar: document.querySelector("#account-bar"),
+  userEmail: document.querySelector("#user-email"),
+  signOutButton: document.querySelector("#sign-out-button"),
+  monthPicker: document.querySelector("#month-picker"),
+  balanceTotal: document.querySelector("#balance-total"),
+  todayDelta: document.querySelector("#today-delta"),
+  incomeTotal: document.querySelector("#income-total"),
+  expenseTotal: document.querySelector("#expense-total"),
+  dailyAverage: document.querySelector("#daily-average"),
+  dailyAverageHint: document.querySelector("#daily-average-hint"),
+  unpaidTotal: document.querySelector("#unpaid-total"),
+  unreceivedTotal: document.querySelector("#unreceived-total"),
+  transactionForm: document.querySelector("#transaction-form"),
+  formTitle: document.querySelector("#form-title"),
+  amount: document.querySelector("#amount"),
+  category: document.querySelector("#category"),
+  transactionDate: document.querySelector("#transaction-date"),
+  note: document.querySelector("#note"),
+  recurringToggle: document.querySelector("#recurring-toggle"),
+  recurringOptions: document.querySelector("#recurring-options"),
+  recurrenceFrequency: document.querySelector("#recurrence-frequency"),
+  saveButton: document.querySelector("#save-button"),
+  cancelEditButton: document.querySelector("#cancel-edit-button"),
+  transactionMessage: document.querySelector("#transaction-message"),
+  transactionList: document.querySelector("#transaction-list"),
+  transactionCount: document.querySelector("#transaction-count"),
+  emptyState: document.querySelector("#empty-state"),
+  recurringList: document.querySelector("#recurring-list"),
+  recurringEmpty: document.querySelector("#recurring-empty"),
+  recurringMessage: document.querySelector("#recurring-message"),
+  themeSelect: document.querySelector("#theme-select"),
+  accentColor: document.querySelector("#accent-color"),
+  categoryForm: document.querySelector("#category-form"),
+  categoryType: document.querySelector("#category-type"),
+  newCategory: document.querySelector("#new-category"),
+  expenseCategoryList: document.querySelector("#expense-category-list"),
+  incomeCategoryList: document.querySelector("#income-category-list"),
+  settingsMessage: document.querySelector("#settings-message"),
+  typeButtons: [...document.querySelectorAll(".type-button")],
+};
+
+let supabaseClient;
+let currentUser;
+let selectedType = "expense";
+let editingId = null;
+let transactions = [];
+let todayExpense = 0;
+let categories = [];
+let recurringTemplates = [];
+let occurrences = [];
+let isSignUp = false;
+let initializedUserId = null;
+
+function showMessage(element, message, isSuccess = false) {
+  element.textContent = message;
+  element.classList.toggle("is-success", isSuccess);
+}
+
+function setBusy(button, busy, busyText, idleText) {
+  button.disabled = busy;
+  button.textContent = busy ? busyText : idleText;
+}
+
+function getLocalDate() {
+  const now = new Date();
+  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 10);
+}
+
+function selectedMonthBounds() {
+  const month = elements.monthPicker.value || getLocalDate().slice(0, 7);
+  const [year, monthNumber] = month.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  return { month, start: `${month}-01`, end: `${month}-${String(lastDay).padStart(2, "0")}`, days: lastDay };
+}
+
+function formatDate(dateString) {
+  return dateFormatter.format(new Date(`${dateString}T12:00:00`));
+}
+
+function applyPreferences(preferences) {
+  document.documentElement.dataset.theme = preferences.theme;
+  document.documentElement.style.setProperty("--green", preferences.accent_color);
+  document.documentElement.style.setProperty("--green-dark", shadeColor(preferences.accent_color, -18));
+  document.documentElement.style.setProperty("--green-foreground", getReadableTextColor(preferences.accent_color));
+  elements.themeSelect.value = preferences.theme;
+  elements.accentColor.value = preferences.accent_color;
+}
+
+function getReadableTextColor(hex) {
+  const channels = [1, 3, 5].map((index) => Number.parseInt(hex.slice(index, index + 2), 16) / 255);
+  const luminance = channels
+    .map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4)
+    .reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
+  const whiteContrast = 1.05 / (luminance + 0.05);
+  const darkContrast = (luminance + 0.05) / 0.055;
+  return whiteContrast >= darkContrast ? "#ffffff" : "#17212f";
+}
+
+function shadeColor(hex, amount) {
+  const number = Number.parseInt(hex.slice(1), 16);
+  const channels = [number >> 16, (number >> 8) & 255, number & 255];
+  return `#${channels.map((channel) => Math.max(0, Math.min(255, channel + amount)).toString(16).padStart(2, "0")).join("")}`;
+}
+
+async function loadPreferences() {
+  const { data, error } = await supabaseClient
+    .from("user_preferences")
+    .select("theme, accent_color")
+    .eq("user_id", currentUser.id)
+    .maybeSingle();
+  if (error) throw error;
+
+  if (!data) {
+    const defaults = { user_id: currentUser.id, theme: "light", accent_color: DEFAULT_ACCENT };
+    const { error: insertError } = await supabaseClient.from("user_preferences").insert(defaults);
+    if (insertError) throw insertError;
+    applyPreferences(defaults);
+    return;
+  }
+  applyPreferences(data);
+}
+
+async function loadCategories() {
+  const { data, error } = await supabaseClient
+    .from("user_categories")
+    .select("id, type, name, active")
+    .eq("user_id", currentUser.id)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+
+  if (data.length === 0) {
+    const defaults = Object.entries(DEFAULT_CATEGORIES).flatMap(([type, names]) =>
+      names.map((name) => ({ user_id: currentUser.id, type, name, active: true })),
+    );
+    const { error: seedError } = await supabaseClient
+      .from("user_categories")
+      .upsert(defaults, { onConflict: "user_id,type,name", ignoreDuplicates: true });
+    if (seedError) throw seedError;
+    return loadCategories();
+  }
+  categories = data;
+  renderCategorySettings();
+  setCategories();
+}
+
+async function initializeUser(user) {
+  const nextUserId = user?.id ?? null;
+  if (initializedUserId === nextUserId) return;
+  initializedUserId = nextUserId;
+  currentUser = user;
+  elements.authView.hidden = Boolean(user);
+  elements.appView.hidden = !user;
+  elements.accountBar.hidden = !user;
+  elements.userEmail.textContent = user?.email ?? "";
+  if (!user) {
+    transactions = [];
+    todayExpense = 0;
+    recurringTemplates = [];
+    occurrences = [];
+    categories = [];
+    renderTransactions();
+    renderRecurring();
+    resetForm();
+    return;
+  }
+
+  try {
+    await Promise.all([loadPreferences(), loadCategories()]);
+    await loadDashboardData();
+  } catch (error) {
+    initializedUserId = null;
+    const message = `โหลดข้อมูลไม่สำเร็จ กรุณาตรวจสอบว่ารัน database.sql แล้ว: ${error.message}`;
+    showMessage(elements.transactionMessage, message);
+    showMessage(elements.settingsMessage, message);
+  }
+}
+
+function setCategories(legacyCategory = "") {
+  const active = categories.filter((category) => category.type === selectedType && category.active);
+  const names = active.map((category) => category.name);
+  if (legacyCategory && !names.includes(legacyCategory)) names.unshift(legacyCategory);
+  const previous = elements.category.value;
+  elements.category.replaceChildren(...names.map((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = categories.some((category) => category.type === selectedType && category.name === name && !category.active)
+      ? `${name} (หมวดหมู่เดิม)`
+      : name;
+    return option;
+  }));
+  if (names.includes(previous)) elements.category.value = previous;
+}
+
+function resetForm() {
+  editingId = null;
+  elements.transactionForm.reset();
+  elements.recurringToggle.disabled = false;
+  elements.transactionDate.value = getLocalDate();
+  elements.formTitle.textContent = "เพิ่มรายการ";
+  elements.saveButton.textContent = "บันทึกรายการ";
+  elements.cancelEditButton.hidden = true;
+  elements.recurringOptions.hidden = true;
+  showMessage(elements.transactionMessage, "");
+  setCategories();
+}
+
+function dueDatesFor(template, endDate) {
+  const [startYear, startMonth, startDay] = template.start_date.split("-").map(Number);
+  const [endYear, endMonth] = endDate.split("-").map(Number);
+  const dates = [];
+  const makeDate = (year, month) => {
+    const day = Math.min(startDay, new Date(Date.UTC(year, month, 0)).getUTCDate());
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  };
+
+  if (template.frequency === "monthly") {
+    for (let year = startYear, month = startMonth; year < endYear || (year === endYear && month <= endMonth);) {
+      const date = makeDate(year, month);
+      if (date >= template.start_date && date <= endDate) dates.push(date);
+      month += 1;
+      if (month > 12) {
+        year += 1;
+        month = 1;
+      }
+    }
+  } else {
+    for (let year = startYear; year <= endYear; year += 1) {
+      const date = makeDate(year, startMonth);
+      if (date >= template.start_date && date <= endDate) dates.push(date);
+    }
+  }
+  return dates;
+}
+
+async function createMissingOccurrences(templates, endDate) {
+  if (templates.length === 0) return;
+  const { data: existing, error: existingError } = await supabaseClient
+    .from("recurring_occurrences")
+    .select("recurring_id, due_date")
+    .eq("user_id", currentUser.id)
+    .in("recurring_id", templates.map((template) => template.id))
+    .lte("due_date", endDate);
+  if (existingError) throw existingError;
+  const existingKeys = new Set(existing.map((item) => `${item.recurring_id}:${item.due_date}`));
+  const rows = templates.flatMap((template) => dueDatesFor(template, endDate)
+    .filter((dueDate) => !existingKeys.has(`${template.id}:${dueDate}`))
+    .map((dueDate) => ({
+    user_id: currentUser.id,
+    recurring_id: template.id,
+    due_date: dueDate,
+    status: "pending",
+    })));
+  for (let index = 0; index < rows.length; index += 500) {
+    const { error } = await supabaseClient
+      .from("recurring_occurrences")
+      .upsert(rows.slice(index, index + 500), {
+        onConflict: "recurring_id,due_date",
+        ignoreDuplicates: true,
+      });
+    if (error) throw error;
+  }
+}
+
+async function loadDashboardData() {
+  const { month, start, end } = selectedMonthBounds();
+  const [transactionResult, templateResult, todayResult] = await Promise.all([
+    supabaseClient
+      .from(TABLE_NAME)
+      .select("id, type, amount, category, note, transaction_date, created_at")
+      .eq("user_id", currentUser.id)
+      .gte("transaction_date", start)
+      .lte("transaction_date", end)
+      .order("transaction_date", { ascending: false })
+      .order("created_at", { ascending: false }),
+    supabaseClient
+      .from("recurring_transactions")
+      .select("id, type, amount, category, note, frequency, start_date, active")
+      .eq("user_id", currentUser.id)
+      .order("created_at", { ascending: true }),
+    supabaseClient
+      .from(TABLE_NAME)
+      .select("type, amount")
+      .eq("user_id", currentUser.id)
+      .eq("transaction_date", getLocalDate())
+  ]);
+  if (transactionResult.error) throw transactionResult.error;
+  if (templateResult.error) throw templateResult.error;
+  if (todayResult.error) throw todayResult.error;
+
+  recurringTemplates = templateResult.data;
+  await createMissingOccurrences(recurringTemplates.filter((template) => template.active), end);
+  const occurrenceResult = await supabaseClient
+    .from("recurring_occurrences")
+    .select("id, recurring_id, due_date, status, paid_on, transaction_id")
+    .eq("user_id", currentUser.id)
+    .lte("due_date", end)
+    .or(`status.eq.pending,due_date.gte.${start}`)
+    .order("due_date", { ascending: true });
+  if (occurrenceResult.error) throw occurrenceResult.error;
+
+  transactions = transactionResult.data;
+  todayExpense = todayResult.data
+    .filter((transaction) => transaction.type === "expense")
+    .reduce((sum, transaction) => sum + Number(transaction.amount), 0);
+  occurrences = occurrenceResult.data;
+  renderTransactions();
+  renderRecurring();
+  showMessage(elements.transactionMessage, "");
+  showMessage(elements.recurringMessage, "");
+}
+
+function renderTransactions() {
+  const income = transactions.reduce((sum, item) => item.type === "income" ? sum + Number(item.amount) : sum, 0);
+  const expense = transactions.reduce((sum, item) => item.type === "expense" ? sum + Number(item.amount) : sum, 0);
+  const balance = income - expense;
+  const days = selectedMonthBounds().days;
+  elements.balanceTotal.textContent = currency.format(balance);
+  elements.incomeTotal.textContent = currency.format(income);
+  elements.expenseTotal.textContent = currency.format(expense);
+  const dailyAverage = balance / days;
+  const todayDifference = dailyAverage - todayExpense;
+  elements.dailyAverage.textContent = currency.format(dailyAverage);
+  elements.todayDelta.textContent = `วันนี้${todayDifference < 0 ? "เกิน" : "เหลือ"} ${todayDifference < 0 ? "−" : "+"}${currency.format(Math.abs(todayDifference))}`;
+  elements.todayDelta.classList.toggle("is-over", todayDifference < 0);
+  elements.transactionCount.textContent = `${transactions.length} รายการ`;
+  elements.emptyState.hidden = transactions.length > 0;
+  elements.transactionList.replaceChildren(...transactions.map(createTransactionElement));
+}
+
+function createTransactionElement(transaction) {
+  const item = document.createElement("article");
+  item.className = "transaction-item";
+  const symbol = document.createElement("span");
+  symbol.className = `transaction-symbol${transaction.type === "income" ? " income-symbol" : ""}`;
+  symbol.textContent = transaction.type === "income" ? "↙" : "↗";
+  symbol.setAttribute("aria-hidden", "true");
+  const info = document.createElement("div");
+  info.className = "transaction-info";
+  const title = document.createElement("strong");
+  title.textContent = transaction.note || transaction.category;
+  const detail = document.createElement("span");
+  detail.textContent = `${transaction.category} · ${formatDate(transaction.transaction_date)}`;
+  info.append(title, detail);
+  const amount = document.createElement("span");
+  amount.className = `transaction-amount ${transaction.type === "income" ? "income-text" : "expense-text"}`;
+  amount.textContent = `${transaction.type === "income" ? "+" : "−"}${currency.format(Number(transaction.amount))}`;
+  const actions = document.createElement("div");
+  actions.className = "item-actions";
+  const editButton = document.createElement("button");
+  editButton.className = "icon-button";
+  editButton.type = "button";
+  editButton.textContent = "✎";
+  editButton.setAttribute("aria-label", `แก้ไข ${transaction.note || transaction.category}`);
+  editButton.addEventListener("click", () => startEditing(transaction));
+  const deleteButton = document.createElement("button");
+  deleteButton.className = "icon-button delete-button";
+  deleteButton.type = "button";
+  deleteButton.textContent = "×";
+  deleteButton.setAttribute("aria-label", `ลบ ${transaction.note || transaction.category}`);
+  deleteButton.addEventListener("click", () => {
+    deleteTransaction(transaction).catch((error) => showMessage(elements.transactionMessage, `ลบรายการไม่สำเร็จ: ${error.message}`));
+  });
+  actions.append(editButton, deleteButton);
+  item.append(symbol, info, amount, actions);
+  return item;
+}
+
+function startEditing(transaction) {
+  editingId = transaction.id;
+  selectedType = transaction.type;
+  elements.typeButtons.forEach((button) => button.classList.toggle("is-active", button.dataset.type === selectedType));
+  setCategories(transaction.category);
+  elements.amount.value = transaction.amount;
+  elements.category.value = transaction.category;
+  elements.transactionDate.value = transaction.transaction_date;
+  elements.note.value = transaction.note || "";
+  elements.recurringToggle.checked = false;
+  elements.recurringToggle.disabled = true;
+  elements.formTitle.textContent = "แก้ไขรายการ";
+  elements.saveButton.textContent = "บันทึกการแก้ไข";
+  elements.cancelEditButton.hidden = false;
+  showMessage(elements.transactionMessage, "");
+  elements.amount.focus();
+}
+
+async function deleteTransaction(transaction) {
+  if (!window.confirm(`ลบรายการ "${transaction.note || transaction.category}" ใช่หรือไม่?`)) return;
+  const { error } = await supabaseClient
+    .from(TABLE_NAME)
+    .delete()
+    .eq("id", transaction.id)
+    .eq("user_id", currentUser.id);
+  if (error) {
+    showMessage(elements.transactionMessage, `ลบรายการไม่สำเร็จ: ${error.message}`);
+    return;
+  }
+  await loadDashboardData().catch((loadError) => showMessage(elements.transactionMessage, `ลบแล้ว แต่โหลดรายการใหม่ไม่สำเร็จ: ${loadError.message}`));
+  if (editingId === transaction.id) resetForm();
+}
+
+function createRecurringOccurrenceElement(occurrence) {
+  const template = recurringTemplates.find((item) => item.id === occurrence.recurring_id);
+  if (!template) return null;
+  const row = document.createElement("article");
+  row.className = `recurring-item${occurrence.status === "paid" ? " is-paid" : ""}`;
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = occurrence.status === "paid";
+  checkbox.disabled = occurrence.status === "paid";
+  checkbox.setAttribute("aria-label", `${occurrence.status === "paid" ? "จ่ายแล้ว" : "ทำเครื่องหมายว่าจ่ายแล้ว"} ${template.note || template.category}`);
+  checkbox.addEventListener("change", () => {
+    settleOccurrence(occurrence).catch((error) => showMessage(elements.recurringMessage, `อัปเดตสถานะไม่สำเร็จ: ${error.message}`));
+  });
+  const description = document.createElement("div");
+  description.className = "recurring-description";
+  const title = document.createElement("strong");
+  title.textContent = template.note || template.category;
+  const due = document.createElement("span");
+  const isOverdue = occurrence.status === "pending" && occurrence.due_date < getLocalDate();
+  due.textContent = `${template.category} · ${occurrence.status === "paid" ? `จ่ายแล้ว ${formatDate(occurrence.paid_on)}` : `ครบกำหนด ${formatDate(occurrence.due_date)}${isOverdue ? " · ค้างชำระ" : ""}`}`;
+  if (isOverdue) due.className = "overdue-text";
+  description.append(title, due);
+  const amount = document.createElement("span");
+  amount.className = `transaction-amount ${template.type === "income" ? "income-text" : "expense-text"}`;
+  amount.textContent = `${template.type === "income" ? "+" : "−"}${currency.format(Number(template.amount))}`;
+  row.append(checkbox, description, amount);
+  return row;
+}
+
+function renderRecurring() {
+  const expensePending = occurrences.reduce((sum, occurrence) => {
+    const template = recurringTemplates.find((item) => item.id === occurrence.recurring_id);
+    return occurrence.status === "pending" && template?.type === "expense" ? sum + Number(template.amount) : sum;
+  }, 0);
+  const incomePending = occurrences.reduce((sum, occurrence) => {
+    const template = recurringTemplates.find((item) => item.id === occurrence.recurring_id);
+    return occurrence.status === "pending" && template?.type === "income" ? sum + Number(template.amount) : sum;
+  }, 0);
+  elements.unpaidTotal.textContent = currency.format(expensePending);
+  elements.unreceivedTotal.textContent = currency.format(incomePending);
+  const occurrenceRows = occurrences.map(createRecurringOccurrenceElement).filter(Boolean);
+  elements.recurringList.replaceChildren(...occurrenceRows);
+  const activeTemplates = recurringTemplates.filter((template) => template.active).map(createTemplateElement);
+  elements.recurringList.append(...activeTemplates);
+  elements.recurringEmpty.hidden = occurrenceRows.length > 0 || activeTemplates.length > 0;
+}
+
+function createTemplateElement(template) {
+  const row = document.createElement("article");
+  row.className = "template-item";
+  const description = document.createElement("div");
+  description.className = "recurring-description";
+  const title = document.createElement("strong");
+  title.textContent = template.note || template.category;
+  const detail = document.createElement("span");
+  detail.textContent = `${template.type === "income" ? "รายรับ" : "รายจ่าย"} · ${template.frequency === "monthly" ? "ทุกเดือน" : "ทุกปี"} · เริ่ม ${formatDate(template.start_date)}`;
+  description.append(title, detail);
+  const amount = document.createElement("span");
+  amount.className = `transaction-amount ${template.type === "income" ? "income-text" : "expense-text"}`;
+  amount.textContent = `${template.type === "income" ? "+" : "−"}${currency.format(Number(template.amount))}`;
+  const stopButton = document.createElement("button");
+  stopButton.className = "button button-quiet stop-recurring";
+  stopButton.type = "button";
+  stopButton.textContent = "หยุดรายการ";
+  stopButton.addEventListener("click", () => {
+    stopRecurring(template).catch((error) => showMessage(elements.recurringMessage, `หยุดรายการไม่สำเร็จ: ${error.message}`));
+  });
+  row.append(description, amount, stopButton);
+  return row;
+}
+
+async function settleOccurrence(occurrence) {
+  const { error } = await supabaseClient.rpc("settle_recurring_occurrence", {
+    p_occurrence_id: occurrence.id,
+    p_paid_on: getLocalDate(),
+  });
+  if (error) {
+    showMessage(elements.recurringMessage, `อัปเดตสถานะไม่สำเร็จ: ${error.message}`);
+    await loadDashboardData().catch((loadError) => showMessage(elements.recurringMessage, loadError.message));
+    return;
+  }
+  await loadDashboardData().catch((loadError) => showMessage(elements.recurringMessage, `บันทึกแล้ว แต่โหลดรายการใหม่ไม่สำเร็จ: ${loadError.message}`));
+}
+
+async function stopRecurring(template) {
+  if (!window.confirm(`หยุดสร้างรายการ "${template.note || template.category}" ในรอบถัดไปหรือไม่? ยอดค้างเดิมจะยังอยู่`)) return;
+  const { error } = await supabaseClient
+    .from("recurring_transactions")
+    .update({ active: false })
+    .eq("id", template.id)
+    .eq("user_id", currentUser.id);
+  if (error) {
+    showMessage(elements.recurringMessage, `หยุดรายการไม่สำเร็จ: ${error.message}`);
+    return;
+  }
+  await loadDashboardData().catch((loadError) => showMessage(elements.recurringMessage, loadError.message));
+}
+
+function renderCategorySettings() {
+  renderCategoryList("expense", elements.expenseCategoryList);
+  renderCategoryList("income", elements.incomeCategoryList);
+}
+
+function renderCategoryList(type, container) {
+  const rows = categories.filter((category) => category.type === type);
+  container.replaceChildren(...rows.map((category) => {
+    const row = document.createElement("div");
+    row.className = `category-item${category.active ? "" : " category-inactive"}`;
+    const name = document.createElement("span");
+    name.textContent = category.name;
+    const actions = document.createElement("div");
+    actions.className = "category-actions";
+    const rename = document.createElement("button");
+    rename.className = "text-button";
+    rename.type = "button";
+    rename.textContent = "เปลี่ยนชื่อ";
+    rename.addEventListener("click", () => {
+      renameCategory(category).catch((error) => showMessage(elements.settingsMessage, `เปลี่ยนชื่อไม่สำเร็จ: ${error.message}`));
+    });
+    actions.append(rename);
+    if (category.active) {
+      const remove = document.createElement("button");
+      remove.className = "text-button deactivate-category";
+      remove.type = "button";
+      remove.textContent = "ลบ";
+      remove.addEventListener("click", () => {
+        deleteCategory(category).catch((error) => showMessage(elements.settingsMessage, `ลบหมวดหมู่ไม่สำเร็จ: ${error.message}`));
+      });
+      actions.append(remove);
+    } else {
+      const activate = document.createElement("button");
+      activate.className = "text-button";
+      activate.type = "button";
+      activate.textContent = "เปิดใช้";
+      activate.addEventListener("click", () => {
+        activateCategory(category).catch((error) => showMessage(elements.settingsMessage, `เปิดใช้หมวดหมู่ไม่สำเร็จ: ${error.message}`));
+      });
+      actions.append(activate);
+      const remove = document.createElement("button");
+      remove.className = "text-button deactivate-category";
+      remove.type = "button";
+      remove.textContent = "ลบ";
+      remove.addEventListener("click", () => {
+        deleteCategory(category).catch((error) => showMessage(elements.settingsMessage, `ลบหมวดหมู่ไม่สำเร็จ: ${error.message}`));
+      });
+      actions.append(remove);
+    }
+    row.append(name, actions);
+    return row;
+  }));
+}
+
+async function renameCategory(category) {
+  const name = window.prompt("ชื่อหมวดหมู่ใหม่ (ชื่อเดิมในรายการย้อนหลังจะไม่เปลี่ยน)", category.name);
+  if (name === null) return;
+  const cleanedName = name.trim();
+  if (!cleanedName || cleanedName.length > 40) {
+    showMessage(elements.settingsMessage, "ชื่อหมวดหมู่ต้องมี 1–40 ตัวอักษร");
+    return;
+  }
+  const { error } = await supabaseClient
+    .from("user_categories")
+    .update({ name: cleanedName })
+    .eq("id", category.id)
+    .eq("user_id", currentUser.id);
+  if (error) {
+    showMessage(elements.settingsMessage, `เปลี่ยนชื่อไม่สำเร็จ: ${error.message}`);
+    return;
+  }
+  await loadCategories();
+  showMessage(elements.settingsMessage, "เปลี่ยนชื่อแล้ว รายการย้อนหลังยังคงชื่อเดิม", true);
+}
+
+async function deleteCategory(category) {
+  if (!window.confirm(`ลบหมวดหมู่ "${category.name}" หรือไม่? รายการย้อนหลังและรายการประจำที่ใช้ชื่อนี้จะไม่ถูกลบหรือเปลี่ยนชื่อ`)) return;
+  const { error } = await supabaseClient
+    .from("user_categories")
+    .delete()
+    .eq("id", category.id)
+    .eq("user_id", currentUser.id);
+  if (error) {
+    showMessage(elements.settingsMessage, `ลบหมวดหมู่ไม่สำเร็จ: ${error.message}`);
+    return;
+  }
+  await loadCategories();
+  showMessage(elements.settingsMessage, "ลบหมวดหมู่แล้ว รายการย้อนหลังและรายการประจำยังคงชื่อเดิม", true);
+}
+
+async function activateCategory(category) {
+  const { error } = await supabaseClient
+    .from("user_categories")
+    .update({ active: true })
+    .eq("id", category.id)
+    .eq("user_id", currentUser.id);
+  if (error) {
+    showMessage(elements.settingsMessage, `เปิดใช้หมวดหมู่ไม่สำเร็จ: ${error.message}`);
+    return;
+  }
+  await loadCategories();
+  showMessage(elements.settingsMessage, "เปิดใช้หมวดหมู่แล้ว", true);
+}
+
+elements.authSwitchButton.addEventListener("click", () => {
+  isSignUp = !isSignUp;
+  elements.authTitle.textContent = isSignUp ? "สร้างบัญชีใหม่" : "เข้าสู่ระบบ";
+  elements.authDescription.textContent = isSignUp ? "สมัครสมาชิกเพื่อเริ่มบันทึกบัญชีของคุณ" : "เข้าสู่ระบบเพื่อจัดการบัญชีของคุณ";
+  elements.authSubmit.textContent = isSignUp ? "สมัครสมาชิก" : "เข้าสู่ระบบ";
+  elements.authPassword.autocomplete = isSignUp ? "new-password" : "current-password";
+  elements.authSwitchLabel.textContent = isSignUp ? "มีบัญชีอยู่แล้ว?" : "ยังไม่มีบัญชี?";
+  elements.authSwitchButton.textContent = isSignUp ? "เข้าสู่ระบบ" : "สมัครสมาชิก";
+  showMessage(elements.authMessage, "");
+});
+
+elements.authForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  showMessage(elements.authMessage, "");
+  setBusy(elements.authSubmit, true, "กำลังดำเนินการ...", isSignUp ? "สมัครสมาชิก" : "เข้าสู่ระบบ");
+  try {
+    const credentials = { email: elements.authEmail.value.trim(), password: elements.authPassword.value };
+    const { data, error } = isSignUp
+      ? await supabaseClient.auth.signUp(credentials)
+      : await supabaseClient.auth.signInWithPassword(credentials);
+    if (error) throw error;
+    if (isSignUp && !data.session) {
+      showMessage(elements.authMessage, "สมัครสมาชิกแล้ว กรุณาตรวจสอบอีเมลเพื่อยืนยันบัญชี", true);
+    } else if (data.user) {
+      await initializeUser(data.user);
+    }
+  } catch (error) {
+    showMessage(elements.authMessage, error.message);
+  } finally {
+    setBusy(elements.authSubmit, false, "", isSignUp ? "สมัครสมาชิก" : "เข้าสู่ระบบ");
+  }
+});
+
+elements.signOutButton.addEventListener("click", async () => {
+  try {
+    const { error } = await supabaseClient.auth.signOut();
+    if (error) showMessage(elements.transactionMessage, `ออกจากระบบไม่สำเร็จ: ${error.message}`);
+  } catch (error) {
+    showMessage(elements.transactionMessage, `ออกจากระบบไม่สำเร็จ: ${error.message}`);
+  }
+});
+
+elements.typeButtons.forEach((button) => button.addEventListener("click", () => {
+  selectedType = button.dataset.type;
+  elements.typeButtons.forEach((typeButton) => typeButton.classList.toggle("is-active", typeButton === button));
+  setCategories();
+}));
+
+elements.recurringToggle.addEventListener("change", () => {
+  elements.recurringOptions.hidden = !elements.recurringToggle.checked;
+});
+
+elements.transactionForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  showMessage(elements.transactionMessage, "");
+  const wasEditing = Boolean(editingId);
+  const isRecurring = elements.recurringToggle.checked && !wasEditing;
+  const idleText = wasEditing ? "บันทึกการแก้ไข" : isRecurring ? "สร้างรายการประจำ" : "บันทึกรายการ";
+  setBusy(elements.saveButton, true, "กำลังบันทึก...", idleText);
+  const record = {
+    user_id: currentUser.id,
+    type: selectedType,
+    amount: Number(elements.amount.value),
+    category: elements.category.value,
+    note: elements.note.value.trim() || null,
+    transaction_date: elements.transactionDate.value,
+  };
+  let saved = false;
+  try {
+    if (isRecurring) {
+      const { transaction_date: startDate, ...template } = record;
+      const { error } = await supabaseClient.from("recurring_transactions").insert({
+        ...template,
+        start_date: startDate,
+        frequency: elements.recurrenceFrequency.value,
+      });
+      if (error) throw error;
+    } else {
+      const query = editingId
+        ? supabaseClient.from(TABLE_NAME).update(record).eq("id", editingId).eq("user_id", currentUser.id)
+        : supabaseClient.from(TABLE_NAME).insert(record);
+      const { error } = await query;
+      if (error) throw error;
+    }
+    saved = true;
+    resetForm();
+    showMessage(elements.transactionMessage, isRecurring ? "สร้างรายการประจำแล้ว" : "บันทึกรายการแล้ว", true);
+  } catch (error) {
+    showMessage(elements.transactionMessage, `บันทึกไม่สำเร็จ: ${error.message}`);
+  } finally {
+    setBusy(elements.saveButton, false, "", wasEditing ? "บันทึกการแก้ไข" : "บันทึกรายการ");
+  }
+  if (!saved) return;
+  await loadDashboardData().catch((error) => showMessage(elements.transactionMessage, `บันทึกแล้ว แต่โหลดข้อมูลใหม่ไม่สำเร็จ: ${error.message}`));
+});
+
+elements.cancelEditButton.addEventListener("click", () => {
+  elements.recurringToggle.disabled = false;
+  resetForm();
+});
+
+elements.monthPicker.addEventListener("change", () => {
+  loadDashboardData().catch((error) => showMessage(elements.transactionMessage, `โหลดรายการไม่สำเร็จ: ${error.message}`));
+});
+
+elements.categoryForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const name = elements.newCategory.value.trim();
+    if (!name || name.length > 40) {
+      showMessage(elements.settingsMessage, "ชื่อหมวดหมู่ต้องมี 1–40 ตัวอักษร");
+      return;
+    }
+    const { error } = await supabaseClient.from("user_categories").insert({
+      user_id: currentUser.id,
+      type: elements.categoryType.value,
+      name,
+      active: true,
+    });
+    if (error) {
+      showMessage(elements.settingsMessage, `เพิ่มหมวดหมู่ไม่สำเร็จ: ${error.message}`);
+      return;
+    }
+    elements.categoryForm.reset();
+    await loadCategories();
+    showMessage(elements.settingsMessage, "เพิ่มหมวดหมู่แล้ว", true);
+  } catch (error) {
+    showMessage(elements.settingsMessage, `เพิ่มหมวดหมู่ไม่สำเร็จ: ${error.message}`);
+  }
+});
+
+async function savePreferences(patch) {
+  const preferences = {
+    user_id: currentUser.id,
+    theme: elements.themeSelect.value,
+    accent_color: elements.accentColor.value,
+    ...patch,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabaseClient.from("user_preferences").upsert(preferences, { onConflict: "user_id" });
+  if (error) {
+    showMessage(elements.settingsMessage, `บันทึกการตั้งค่าไม่สำเร็จ: ${error.message}`);
+    return;
+  }
+  applyPreferences(preferences);
+  showMessage(elements.settingsMessage, "บันทึกการตั้งค่าแล้ว", true);
+}
+
+elements.themeSelect.addEventListener("change", () => {
+  savePreferences({ theme: elements.themeSelect.value }).catch((error) => showMessage(elements.settingsMessage, `บันทึกการตั้งค่าไม่สำเร็จ: ${error.message}`));
+});
+elements.accentColor.addEventListener("change", () => {
+  savePreferences({ accent_color: elements.accentColor.value }).catch((error) => showMessage(elements.settingsMessage, `บันทึกการตั้งค่าไม่สำเร็จ: ${error.message}`));
+});
+
+function startApp() {
+  if (!window.supabase) {
+    showMessage(elements.authMessage, "เชื่อมต่อ Supabase client ไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต");
+    elements.authSubmit.disabled = true;
+    return;
+  }
+
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  elements.monthPicker.value = getLocalDate().slice(0, 7);
+  elements.transactionDate.value = getLocalDate();
+  supabaseClient.auth.onAuthStateChange((_event, session) => {
+    window.setTimeout(() => {
+      initializeUser(session?.user ?? null).catch((error) => {
+        showMessage(elements.transactionMessage, `โหลดข้อมูลไม่สำเร็จ: ${error.message}`);
+      });
+    }, 0);
+  });
+  supabaseClient.auth.getSession()
+    .then(({ data, error }) => {
+      if (error) throw error;
+      return initializeUser(data.session?.user ?? null);
+    })
+    .catch((error) => showMessage(elements.authMessage, `ตรวจสอบสถานะเข้าสู่ระบบไม่สำเร็จ: ${error.message}`));
+}
+
+startApp();
