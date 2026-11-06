@@ -58,39 +58,63 @@
             <p class="eyebrow">ภาพรวมการเงิน</p>
             <h1>บัญชีของฉัน</h1>
           </div>
-          <label class="month-picker">
-            <span>เลือกเดือน</span>
-            <input id="month-picker" class="input" type="month">
-          </label>
+          <div class="view-controls">
+            <label class="period-picker">
+              <span>มุมมอง</span>
+              <select id="period-mode" class="input">
+                <option value="month">เดือน</option>
+                <option value="year">ปี</option>
+              </select>
+            </label>
+            <label id="month-picker-wrap" class="month-picker">
+              <span>เลือกเดือน</span>
+              <input id="month-picker" class="input" type="month">
+            </label>
+            <label id="year-picker-wrap" class="year-picker" hidden>
+              <span>เลือกปี</span>
+              <input id="year-picker" class="input" type="number" min="2024" step="1">
+            </label>
+          </div>
         </div>
 
         <div class="summary-grid">
           <article class="summary-card balance-card">
             <div class="summary-label"><span class="summary-icon balance-icon">฿</span> คงเหลือสุทธิ</div>
             <p id="balance-total" class="summary-amount">฿0.00</p>
-            <p class="balance-substat">เฉลี่ยคงเหลือต่อวัน <strong id="daily-average">฿0.00</strong></p>
+            <p class="balance-substat">เฉลี่ยต่อวัน <strong id="daily-average">฿0.00</strong></p>
             <p id="today-delta" class="balance-delta">วันนี้เหลือ +฿0.00</p>
             <p class="summary-hint">รายรับลบรายจ่าย</p>
           </article>
           <article class="summary-card">
-            <div class="summary-label"><span class="summary-icon income-icon">↙</span> รายรับ</div>
+            <div class="summary-label"><span class="summary-icon income-icon">↙</span> รายรับวันนี้</div>
             <p id="income-total" class="summary-amount income-text">฿0.00</p>
-            <p class="summary-hint">รวมรายรับเดือนนี้</p>
+            <p class="summary-hint summary-hint-row">
+              <span>เดือนนี้: <strong id="income-month">฿0.00</strong></span>
+              <span>ปีนี้: <strong id="income-year">฿0.00</strong></span>
+            </p>
           </article>
           <article class="summary-card">
-            <div class="summary-label"><span class="summary-icon expense-icon">↗</span> รายจ่าย</div>
+            <div class="summary-label"><span class="summary-icon expense-icon">↗</span> รายจ่ายวันนี้</div>
             <p id="expense-total" class="summary-amount expense-text">฿0.00</p>
-            <p class="summary-hint">รวมรายจ่ายเดือนนี้</p>
+            <p class="summary-hint summary-hint-row">
+              <span>เดือนนี้: <strong id="expense-month">฿0.00</strong></span>
+              <span>ปีนี้: <strong id="expense-year">฿0.00</strong></span>
+            </p>
+          </article>
+          <article class="summary-card asset-card">
+            <div class="summary-label"><span class="summary-icon asset-icon">◈</span> สินทรัพย์</div>
+            <p id="asset-total" class="summary-amount asset-text">฿0.00</p>
+            <p class="summary-hint">รวมสินทรัพย์ที่มีอยู่</p>
           </article>
           <article class="summary-card">
             <div class="summary-label"><span class="summary-icon expense-icon">!</span> รายจ่ายที่ยังไม่จ่าย</div>
             <p id="unpaid-total" class="summary-amount expense-text">฿0.00</p>
-            <p class="summary-hint">รวมยอดค้างถึงสิ้นเดือนที่เลือก</p>
+            <p class="summary-hint">รวมยอดรายการที่ยังค้าง</p>
           </article>
           <article class="summary-card">
             <div class="summary-label"><span class="summary-icon income-icon">?</span> รายรับที่ยังไม่ได้รับ</div>
             <p id="unreceived-total" class="summary-amount income-text">฿0.00</p>
-            <p class="summary-hint">รวมยอดรายรับประจำที่ยังค้าง</p>
+            <p class="summary-hint">รวมยอดรายการที่ยังค้าง</p>
           </article>
         </div>
 
@@ -106,6 +130,14 @@
               <div class="type-toggle" role="group" aria-label="ประเภทรายการ">
                 <button class="type-button is-active" data-type="expense" type="button">รายจ่าย</button>
                 <button class="type-button" data-type="income" type="button">รายรับ</button>
+                <button class="type-button" data-type="asset" type="button">สินทรัพย์</button>
+              </div>
+              <div id="asset-action-wrap" hidden>
+                <label class="field-label" for="asset-action">รายการสินทรัพย์</label>
+                <select id="asset-action" class="input">
+                  <option value="add">นำเข้าสินทรัพย์ (นับเป็นรายจ่าย)</option>
+                  <option value="withdraw">ถอน/ขายสินทรัพย์ (นับเป็นรายรับ)</option>
+                </select>
               </div>
               <label class="field-label" for="amount">จำนวนเงิน (บาท)</label>
               <div class="amount-wrap"><span>฿</span><input id="amount" class="input amount-input" type="number" min="0.01" step="0.01" placeholder="0.00" required></div>
@@ -161,7 +193,7 @@
           <div class="section-heading history-heading">
             <div>
               <h2>รายการประจำและยอดค้าง</h2>
-              <p class="muted">ติ๊กเมื่อชำระหรือได้รับเงินแล้ว รายการค้างจะแสดงจนกว่าจะปิดยอด</p>
+              <p class="muted">รายการรายรับ/รายจ่ายที่ตั้งวันล่วงหน้าจะเป็นยอดค้างอัตโนมัติ ติ๊กเมื่อรับเงินหรือชำระแล้ว</p>
             </div>
           </div>
           <div id="recurring-list" class="recurring-list"></div>
@@ -197,6 +229,7 @@
                 <select id="category-type" class="input" aria-label="ประเภทหมวดหมู่">
                   <option value="expense">รายจ่าย</option>
                   <option value="income">รายรับ</option>
+                  <option value="asset">สินทรัพย์</option>
                 </select>
                 <input id="new-category" class="input" type="text" maxlength="40" placeholder="ชื่อหมวดหมู่ใหม่" required>
                 <button class="button button-primary" type="submit">เพิ่ม</button>
@@ -209,6 +242,10 @@
                 <div>
                   <h4>รายรับ</h4>
                   <div id="income-category-list" class="category-list"></div>
+                </div>
+                <div>
+                  <h4>สินทรัพย์</h4>
+                  <div id="asset-category-list" class="category-list"></div>
                 </div>
               </div>
               <p id="settings-message" class="form-message" role="status" aria-live="polite"></p>

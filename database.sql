@@ -3,13 +3,62 @@
 create table if not exists public.transactions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  type text not null check (type in ('income', 'expense')),
+  type text not null check (type in ('income', 'expense', 'asset')),
+  asset_action text,
   amount numeric(12, 2) not null check (amount > 0),
   category text not null,
   note text,
   transaction_date date not null,
+  is_settled boolean not null default true,
   created_at timestamptz not null default now()
 );
+
+do $$
+begin
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'transactions'
+      and column_name = 'is_settled'
+  ) then
+    alter table public.transactions add column is_settled boolean;
+    update public.transactions
+    set is_settled = (type = 'asset' or transaction_date <= current_date);
+    alter table public.transactions alter column is_settled set default true;
+    alter table public.transactions alter column is_settled set not null;
+  end if;
+end $$;
+
+alter table public.transactions
+  drop constraint if exists transactions_type_check;
+
+alter table public.transactions
+  add constraint transactions_type_check
+  check (type in ('income', 'expense', 'asset')) not valid;
+
+alter table public.transactions
+  validate constraint transactions_type_check;
+
+alter table public.transactions
+  add column if not exists asset_action text;
+
+update public.transactions
+set asset_action = 'add'
+where type = 'asset' and asset_action is null;
+
+alter table public.transactions
+  drop constraint if exists transactions_asset_action_check;
+
+alter table public.transactions
+  add constraint transactions_asset_action_check
+  check (
+    (type = 'asset' and asset_action is not null and asset_action in ('add', 'withdraw'))
+    or (type <> 'asset' and asset_action is null)
+  ) not valid;
+
+alter table public.transactions
+  validate constraint transactions_asset_action_check;
 
 alter table public.transactions enable row level security;
 
@@ -53,12 +102,22 @@ using (auth.uid() = user_id);
 create table if not exists public.user_categories (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  type text not null check (type in ('income', 'expense')),
+  type text not null check (type in ('income', 'expense', 'asset')),
   name text not null check (length(trim(name)) between 1 and 40),
   active boolean not null default true,
   created_at timestamptz not null default now(),
   unique (user_id, type, name)
 );
+
+alter table public.user_categories
+  drop constraint if exists user_categories_type_check;
+
+alter table public.user_categories
+  add constraint user_categories_type_check
+  check (type in ('income', 'expense', 'asset')) not valid;
+
+alter table public.user_categories
+  validate constraint user_categories_type_check;
 
 create table if not exists public.user_preferences (
   user_id uuid primary key references auth.users(id) on delete cascade,
@@ -70,7 +129,8 @@ create table if not exists public.user_preferences (
 create table if not exists public.recurring_transactions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  type text not null check (type in ('income', 'expense')),
+  type text not null check (type in ('income', 'expense', 'asset')),
+  asset_action text,
   amount numeric(12, 2) not null check (amount > 0),
   category text not null,
   note text,
@@ -79,6 +139,36 @@ create table if not exists public.recurring_transactions (
   active boolean not null default true,
   created_at timestamptz not null default now()
 );
+
+alter table public.recurring_transactions
+  drop constraint if exists recurring_transactions_type_check;
+
+alter table public.recurring_transactions
+  add constraint recurring_transactions_type_check
+  check (type in ('income', 'expense', 'asset')) not valid;
+
+alter table public.recurring_transactions
+  validate constraint recurring_transactions_type_check;
+
+alter table public.recurring_transactions
+  add column if not exists asset_action text;
+
+update public.recurring_transactions
+set asset_action = 'add'
+where type = 'asset' and asset_action is null;
+
+alter table public.recurring_transactions
+  drop constraint if exists recurring_transactions_asset_action_check;
+
+alter table public.recurring_transactions
+  add constraint recurring_transactions_asset_action_check
+  check (
+    (type = 'asset' and asset_action is not null and asset_action in ('add', 'withdraw'))
+    or (type <> 'asset' and asset_action is null)
+  ) not valid;
+
+alter table public.recurring_transactions
+  validate constraint recurring_transactions_asset_action_check;
 
 create table if not exists public.recurring_occurrences (
   id uuid primary key default gen_random_uuid(),
@@ -176,10 +266,11 @@ begin
     raise exception 'Recurring transaction not found';
   end if;
 
-  insert into public.transactions (user_id, type, amount, category, note, transaction_date)
+  insert into public.transactions (user_id, type, asset_action, amount, category, note, transaction_date)
   values (
     auth.uid(),
     v_recurring.type,
+    v_recurring.asset_action,
     v_recurring.amount,
     v_recurring.category,
     v_recurring.note,
