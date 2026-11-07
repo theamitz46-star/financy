@@ -40,6 +40,8 @@ const elements = {
   expenseMonth: document.querySelector("#expense-month"),
   expenseYear: document.querySelector("#expense-year"),
   assetTotal: document.querySelector("#asset-total"),
+  assetHoldingsList: document.querySelector("#asset-holdings-list"),
+  assetHoldingsEmpty: document.querySelector("#asset-holdings-empty"),
   dailyAverage: document.querySelector("#daily-average"),
   dailyAverageHint: document.querySelector("#daily-average-hint"),
   unpaidTotal: document.querySelector("#unpaid-total"),
@@ -387,7 +389,7 @@ async function loadDashboardData() {
       .lte("transaction_date", `${currentYear}-12-31`),
     supabaseClient
       .from(TABLE_NAME)
-      .select("asset_action, amount")
+      .select("asset_action, amount, category, note")
       .eq("user_id", currentUser.id)
       .eq("type", "asset")
       .lte("transaction_date", getLocalDate()),
@@ -462,6 +464,7 @@ function renderTransactions() {
   elements.incomeYear.textContent = currency.format(yearIncome);
   elements.expenseYear.textContent = currency.format(yearExpense);
   elements.assetTotal.textContent = currency.format(assetTotal);
+  renderAssetHoldings();
   elements.dailyAverage.textContent = currency.format(dailyAverage);
   elements.todayDelta.textContent = `วันนี้${todayDifference < 0 ? "เกิน" : "เหลือ"} ${todayDifference < 0 ? "−" : "+"}${currency.format(Math.abs(todayDifference))}`;
   elements.todayDelta.classList.toggle("is-over", todayDifference < 0);
@@ -469,6 +472,38 @@ function renderTransactions() {
   elements.transactionCount.textContent = `${settledTransactions.length} รายการ`;
   elements.emptyState.hidden = settledTransactions.length > 0;
   elements.transactionList.replaceChildren(...settledTransactions.map(createTransactionElement));
+}
+
+function renderAssetHoldings() {
+  const holdings = new Map();
+  for (const transaction of assetTransactions) {
+    const name = transaction.note?.trim() || transaction.category;
+    const key = `${transaction.category}\u0000${name}`;
+    const holding = holdings.get(key) || { name, category: transaction.category, amount: 0 };
+    holding.amount += (transaction.asset_action === "withdraw" ? -1 : 1) * Number(transaction.amount);
+    holdings.set(key, holding);
+  }
+
+  const rows = [...holdings.values()]
+    .filter((holding) => holding.amount !== 0)
+    .sort((left, right) => left.name.localeCompare(right.name, "th"));
+  elements.assetHoldingsEmpty.hidden = rows.length > 0;
+  elements.assetHoldingsList.replaceChildren(...rows.map((holding) => {
+    const row = document.createElement("article");
+    row.className = "asset-holding-item";
+    const description = document.createElement("div");
+    description.className = "asset-holding-description";
+    const name = document.createElement("strong");
+    name.textContent = holding.name;
+    const category = document.createElement("span");
+    category.textContent = holding.category;
+    description.append(name, category);
+    const amount = document.createElement("strong");
+    amount.className = "asset-holding-amount";
+    amount.textContent = currency.format(holding.amount);
+    row.append(description, amount);
+    return row;
+  }));
 }
 
 function createTransactionElement(transaction) {

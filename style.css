@@ -146,6 +146,14 @@ button { cursor: pointer; }
 .empty-state strong { color: #5a687c; font-size: 14px; }
 .privacy-note { margin: 16px 2px 0; color: #9aa5b4; font-size: 11px; text-align: center; }
 .recurring-card, .settings-card { margin-top: 18px; padding: 23px; }
+.asset-holdings-card { margin-top: 18px; padding: 23px; }
+.asset-holdings-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.asset-holding-item { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #f0e5c4; border-radius: 12px; background: #fffdf7; padding: 13px 15px; }
+.asset-holding-description { min-width: 0; }
+.asset-holding-description strong { display: block; overflow: hidden; color: #745a08; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.asset-holding-description span { display: block; margin-top: 3px; color: #9aa5b4; font-size: 11px; }
+.asset-holding-amount { color: #a17b07; font-size: 13px; white-space: nowrap; }
+.asset-holdings-empty { margin: 0; padding: 16px 0 4px; text-align: center; }
 .recurring-list { display: grid; }
 .recurring-item, .template-item { min-height: 67px; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 12px; border-top: 1px solid var(--border); }
 .pending-transaction-item { grid-template-columns: 24px minmax(0, 1fr) auto auto; }
@@ -204,6 +212,9 @@ button { cursor: pointer; }
 :root[data-theme="dark"] .asset-card .summary-label,
 :root[data-theme="dark"] .asset-card .summary-amount,
 :root[data-theme="dark"] .asset-card .summary-icon { color: #f0c75d; }
+:root[data-theme="dark"] .asset-holding-item { border-color: var(--border); background: var(--surface); }
+:root[data-theme="dark"] .asset-holding-description strong,
+:root[data-theme="dark"] .asset-holding-amount { color: #f0c75d; }
 :root[data-theme="dark"] .input,
 :root[data-theme="dark"] select { border-color: var(--border); color: var(--text); }
 :root[data-theme="dark"] .transaction-item,
@@ -255,7 +266,8 @@ button { cursor: pointer; }
   .summary-amount { font-size: 23px; }
   .content-grid { grid-template-columns: 1fr; gap: 14px; margin-top: 14px; }
   .transaction-card, .history-card { padding: 19px; }
-  .recurring-card, .settings-card { padding: 19px; }
+  .recurring-card, .settings-card, .asset-holdings-card { padding: 19px; }
+  .asset-holdings-list { grid-template-columns: 1fr; }
   .transaction-item { grid-template-columns: 38px 1fr auto auto; }
   .item-actions { grid-column: auto; margin-top: 0; }
   .settings-grid { grid-template-columns: 1fr; gap: 22px; }
