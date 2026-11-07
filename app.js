@@ -35,7 +35,6 @@ const elements = {
   todayDelta: document.querySelector("#today-delta"),
   incomeTotal: document.querySelector("#income-total"),
   expenseTotal: document.querySelector("#expense-total"),
-  incomeMonth: document.querySelector("#income-month"),
   incomeYear: document.querySelector("#income-year"),
   expenseMonth: document.querySelector("#expense-month"),
   expenseYear: document.querySelector("#expense-year"),
@@ -84,7 +83,6 @@ let editingId = null;
 let editingIsSettled = true;
 let transactions = [];
 let pendingTransactions = [];
-let todayIncome = 0;
 let todayExpense = 0;
 let yearTransactions = [];
 let assetTransactions = [];
@@ -224,7 +222,6 @@ async function initializeUser(user) {
   if (!user) {
     transactions = [];
     pendingTransactions = [];
-    todayIncome = 0;
     todayExpense = 0;
     yearTransactions = [];
     assetTransactions = [];
@@ -424,9 +421,6 @@ async function loadDashboardData() {
   pendingTransactions = pendingResult.data;
   yearTransactions = yearResult.data;
   assetTransactions = assetResult.data;
-  todayIncome = todayResult.data
-    .filter((transaction) => transaction.is_settled && getEffectiveType(transaction) === "income")
-    .reduce((sum, transaction) => sum + Number(transaction.amount), 0);
   todayExpense = todayResult.data
     .filter((transaction) => transaction.is_settled && getEffectiveType(transaction) === "expense")
     .reduce((sum, transaction) => sum + Number(transaction.amount), 0);
@@ -448,6 +442,11 @@ function renderTransactions() {
   const balance = income - expense;
   const yearIncome = sumByEffectiveType(yearTransactions, "income");
   const yearExpense = sumByEffectiveType(yearTransactions, "expense");
+  const currentMonth = getLocalDate().slice(0, 7);
+  const currentMonthIncome = sumByEffectiveType(
+    yearTransactions.filter((item) => item.transaction_date.startsWith(currentMonth)),
+    "income",
+  );
   const assetTotal = assetTransactions.reduce(
     (sum, item) => sum + (item.asset_action === "withdraw" ? -1 : 1) * Number(item.amount),
     0,
@@ -457,9 +456,8 @@ function renderTransactions() {
   const todayDifference = dailyAverage - todayExpense;
 
   elements.balanceTotal.textContent = currency.format(balance);
-  elements.incomeTotal.textContent = currency.format(todayIncome);
+  elements.incomeTotal.textContent = currency.format(currentMonthIncome);
   elements.expenseTotal.textContent = currency.format(todayExpense);
-  elements.incomeMonth.textContent = currency.format(income);
   elements.expenseMonth.textContent = currency.format(expense);
   elements.incomeYear.textContent = currency.format(yearIncome);
   elements.expenseYear.textContent = currency.format(yearExpense);
