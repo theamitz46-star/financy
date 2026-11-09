@@ -8,6 +8,7 @@ const DEFAULT_CATEGORIES = {
   asset: ["เงินออม", "หุ้น", "ทองคำ", "สินทรัพย์ถาวร", "อื่น ๆ"],
 };
 const DEFAULT_ACCENT = "#23876c";
+const TRANSACTIONS_PER_PAGE = 6;
 const currency = new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB" });
 const dateFormatter = new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "short", year: "numeric" });
 
@@ -50,17 +51,24 @@ const elements = {
   amount: document.querySelector("#amount"),
   assetActionWrap: document.querySelector("#asset-action-wrap"),
   assetAction: document.querySelector("#asset-action"),
+  goalSelect: document.querySelector("#goal-select"),
   category: document.querySelector("#category"),
   transactionDate: document.querySelector("#transaction-date"),
   note: document.querySelector("#note"),
   recurringToggle: document.querySelector("#recurring-toggle"),
   recurringOptions: document.querySelector("#recurring-options"),
   recurrenceFrequency: document.querySelector("#recurrence-frequency"),
+  recurrenceEndMonth: document.querySelector("#recurrence-end-month"),
   saveButton: document.querySelector("#save-button"),
   cancelEditButton: document.querySelector("#cancel-edit-button"),
   transactionMessage: document.querySelector("#transaction-message"),
   transactionList: document.querySelector("#transaction-list"),
+  transactionTableWrap: document.querySelector("#transaction-table-wrap"),
   transactionCount: document.querySelector("#transaction-count"),
+  transactionPagination: document.querySelector("#transaction-pagination"),
+  transactionPreviousPage: document.querySelector("#transaction-previous-page"),
+  transactionNextPage: document.querySelector("#transaction-next-page"),
+  transactionPageStatus: document.querySelector("#transaction-page-status"),
   emptyState: document.querySelector("#empty-state"),
   recurringList: document.querySelector("#recurring-list"),
   recurringEmpty: document.querySelector("#recurring-empty"),
@@ -73,6 +81,16 @@ const elements = {
   expenseCategoryList: document.querySelector("#expense-category-list"),
   incomeCategoryList: document.querySelector("#income-category-list"),
   settingsMessage: document.querySelector("#settings-message"),
+  goalForm: document.querySelector("#goal-form"),
+  goalId: document.querySelector("#goal-id"),
+  goalName: document.querySelector("#goal-name"),
+  goalTarget: document.querySelector("#goal-target"),
+  goalDate: document.querySelector("#goal-date"),
+  goalSaveButton: document.querySelector("#goal-save-button"),
+  goalCancelButton: document.querySelector("#goal-cancel-button"),
+  goalMessage: document.querySelector("#goal-message"),
+  goalList: document.querySelector("#goal-list"),
+  goalEmpty: document.querySelector("#goal-empty"),
   typeButtons: [...document.querySelectorAll(".type-button")],
 };
 
@@ -82,11 +100,13 @@ let selectedType = "expense";
 let editingId = null;
 let editingIsSettled = true;
 let transactions = [];
+let transactionPage = 1;
 let pendingTransactions = [];
 let todayExpense = 0;
 let yearTransactions = [];
 let assetTransactions = [];
 let categories = [];
+let savingsGoals = [];
 let recurringTemplates = [];
 let occurrences = [];
 let isSignUp = false;
@@ -210,6 +230,15 @@ async function loadCategories() {
   setCategories();
 }
 
+function setGoalOptions(selectedGoalId = "") {
+  const options = [new Option("ไม่ระบุเป้าหมาย", "")];
+  for (const goal of savingsGoals) {
+    options.push(new Option(goal.name, goal.id));
+  }
+  elements.goalSelect.replaceChildren(...options);
+  elements.goalSelect.value = selectedGoalId;
+}
+
 async function initializeUser(user) {
   const nextUserId = user?.id ?? null;
   if (initializedUserId === nextUserId) return;
@@ -228,9 +257,12 @@ async function initializeUser(user) {
     recurringTemplates = [];
     occurrences = [];
     categories = [];
+    savingsGoals = [];
     renderTransactions();
     renderRecurring();
+    renderSavingsGoals();
     resetForm();
+    resetGoalForm();
     return;
   }
 
@@ -281,6 +313,7 @@ function getAssetActionLabel(action) {
 
 function updateAssetActionVisibility() {
   elements.assetActionWrap.hidden = selectedType !== "asset";
+  if (selectedType !== "asset") elements.goalSelect.value = "";
 }
 
 function resetForm() {
@@ -293,15 +326,28 @@ function resetForm() {
   elements.saveButton.textContent = "บันทึกรายการ";
   elements.cancelEditButton.hidden = true;
   elements.recurringOptions.hidden = true;
+  updateRecurrenceEndMonthMinimum();
   elements.assetAction.value = "add";
+  setGoalOptions();
   updateAssetActionVisibility();
   showMessage(elements.transactionMessage, "");
   setCategories();
 }
 
+function updateRecurrenceEndMonthMinimum() {
+  elements.recurrenceEndMonth.min = elements.transactionDate.value.slice(0, 7);
+}
+
+function monthEndDate(month) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  return `${month}-${String(lastDay).padStart(2, "0")}`;
+}
+
 function dueDatesFor(template, endDate) {
   const [startYear, startMonth, startDay] = template.start_date.split("-").map(Number);
-  const [endYear, endMonth] = endDate.split("-").map(Number);
+  const effectiveEndDate = template.end_date && template.end_date < endDate ? template.end_date : endDate;
+  const [endYear, endMonth] = effectiveEndDate.split("-").map(Number);
   const dates = [];
   const makeDate = (year, month) => {
     const day = Math.min(startDay, new Date(Date.UTC(year, month, 0)).getUTCDate());
@@ -311,7 +357,7 @@ function dueDatesFor(template, endDate) {
   if (template.frequency === "monthly") {
     for (let year = startYear, month = startMonth; year < endYear || (year === endYear && month <= endMonth);) {
       const date = makeDate(year, month);
-      if (date >= template.start_date && date <= endDate) dates.push(date);
+      if (date >= template.start_date && date <= effectiveEndDate) dates.push(date);
       month += 1;
       if (month > 12) {
         year += 1;
@@ -321,7 +367,7 @@ function dueDatesFor(template, endDate) {
   } else {
     for (let year = startYear; year <= endYear; year += 1) {
       const date = makeDate(year, startMonth);
-      if (date >= template.start_date && date <= endDate) dates.push(date);
+      if (date >= template.start_date && date <= effectiveEndDate) dates.push(date);
     }
   }
   return dates;
@@ -359,10 +405,10 @@ async function createMissingOccurrences(templates, endDate) {
 async function loadDashboardData() {
   const period = selectedPeriodBounds();
   const currentYear = new Date().getFullYear();
-  const [transactionResult, templateResult, todayResult, yearResult, assetResult, pendingResult] = await Promise.all([
+  const [transactionResult, templateResult, todayResult, yearResult, assetResult, pendingResult, goalResult] = await Promise.all([
     supabaseClient
       .from(TABLE_NAME)
-      .select("id, type, asset_action, is_settled, amount, category, note, transaction_date, created_at")
+      .select("id, type, asset_action, goal_id, is_settled, amount, category, note, transaction_date, created_at")
       .eq("user_id", currentUser.id)
       .gte("transaction_date", period.start)
       .lte("transaction_date", period.end)
@@ -370,7 +416,7 @@ async function loadDashboardData() {
       .order("created_at", { ascending: false }),
     supabaseClient
       .from("recurring_transactions")
-      .select("id, type, asset_action, amount, category, note, frequency, start_date, active")
+      .select("id, type, asset_action, goal_id, amount, category, note, frequency, start_date, end_date, active")
       .eq("user_id", currentUser.id)
       .order("created_at", { ascending: true }),
     supabaseClient
@@ -386,9 +432,10 @@ async function loadDashboardData() {
       .lte("transaction_date", `${currentYear}-12-31`),
     supabaseClient
       .from(TABLE_NAME)
-      .select("asset_action, amount, category, note")
+      .select("asset_action, goal_id, amount, category, note")
       .eq("user_id", currentUser.id)
       .eq("type", "asset")
+      .eq("is_settled", true)
       .lte("transaction_date", getLocalDate()),
     supabaseClient
       .from(TABLE_NAME)
@@ -397,6 +444,12 @@ async function loadDashboardData() {
       .eq("is_settled", false)
       .in("type", ["income", "expense"])
       .order("transaction_date", { ascending: true })
+      .order("created_at", { ascending: true }),
+    supabaseClient
+      .from("savings_goals")
+      .select("id, name, target_amount, target_date, display_periods")
+      .eq("user_id", currentUser.id)
+      .order("target_date", { ascending: true })
       .order("created_at", { ascending: true })
   ]);
   if (transactionResult.error) throw transactionResult.error;
@@ -405,8 +458,11 @@ async function loadDashboardData() {
   if (yearResult.error) throw yearResult.error;
   if (assetResult.error) throw assetResult.error;
   if (pendingResult.error) throw pendingResult.error;
+  if (goalResult.error) throw goalResult.error;
 
   recurringTemplates = templateResult.data;
+  savingsGoals = goalResult.data;
+  setGoalOptions(elements.goalSelect.value);
   await createMissingOccurrences(recurringTemplates.filter((template) => template.active), period.end);
   const occurrenceResult = await supabaseClient
     .from("recurring_occurrences")
@@ -424,9 +480,13 @@ async function loadDashboardData() {
   todayExpense = todayResult.data
     .filter((transaction) => transaction.is_settled && getEffectiveType(transaction) === "expense")
     .reduce((sum, transaction) => sum + Number(transaction.amount), 0);
-  occurrences = occurrenceResult.data;
+  occurrences = occurrenceResult.data.filter((occurrence) => {
+    const template = recurringTemplates.find((item) => item.id === occurrence.recurring_id);
+    return !template?.end_date || occurrence.due_date <= template.end_date;
+  });
   renderTransactions();
   renderRecurring();
+  renderSavingsGoals();
   showMessage(elements.transactionMessage, "");
   showMessage(elements.recurringMessage, "");
 }
@@ -469,15 +529,27 @@ function renderTransactions() {
   const settledTransactions = transactions.filter((item) => item.is_settled);
   elements.transactionCount.textContent = `${settledTransactions.length} รายการ`;
   elements.emptyState.hidden = settledTransactions.length > 0;
-  elements.transactionList.replaceChildren(...settledTransactions.map(createTransactionElement));
+  elements.transactionTableWrap.hidden = settledTransactions.length === 0;
+  const pageCount = Math.ceil(settledTransactions.length / TRANSACTIONS_PER_PAGE);
+  transactionPage = Math.min(transactionPage, Math.max(pageCount, 1));
+  const start = (transactionPage - 1) * TRANSACTIONS_PER_PAGE;
+  elements.transactionList.replaceChildren(
+    ...settledTransactions.slice(start, start + TRANSACTIONS_PER_PAGE).map(createTransactionElement),
+  );
+  elements.transactionPagination.hidden = pageCount <= 1;
+  elements.transactionPageStatus.textContent = `หน้า ${transactionPage} จาก ${pageCount}`;
+  elements.transactionPreviousPage.disabled = transactionPage === 1;
+  elements.transactionNextPage.disabled = transactionPage >= pageCount;
 }
 
 function renderAssetHoldings() {
   const holdings = new Map();
   for (const transaction of assetTransactions) {
-    const name = transaction.note?.trim() || transaction.category;
-    const key = `${transaction.category}\u0000${name}`;
-    const holding = holdings.get(key) || { name, category: transaction.category, amount: 0 };
+    const goal = savingsGoals.find((item) => item.id === transaction.goal_id);
+    const name = goal?.name || transaction.note?.trim() || transaction.category;
+    const category = goal ? `เป้าหมาย · ${transaction.category}` : transaction.category;
+    const key = goal ? `goal:${goal.id}` : `${transaction.category}\u0000${name}`;
+    const holding = holdings.get(key) || { name, category, amount: 0 };
     holding.amount += (transaction.asset_action === "withdraw" ? -1 : 1) * Number(transaction.amount);
     holdings.set(key, holding);
   }
@@ -504,9 +576,100 @@ function renderAssetHoldings() {
   }));
 }
 
+function renderSavingsGoals() {
+  const periodLabels = {
+    day: "วันละ",
+    week: "สัปดาห์ละ",
+    month: "เดือนละ",
+    year: "ปีละ",
+  };
+  const periodDays = { day: 1, week: 7, month: 365.25 / 12, year: 365.25 };
+  elements.goalList.replaceChildren(...savingsGoals.map((goal) => {
+    const saved = assetTransactions
+      .filter((transaction) => transaction.goal_id === goal.id)
+      .reduce(
+        (sum, transaction) => sum + (transaction.asset_action === "withdraw" ? -1 : 1) * Number(transaction.amount),
+        0,
+      );
+    const target = Number(goal.target_amount);
+    const remaining = Math.max(0, target - saved);
+    const today = new Date(`${getLocalDate()}T12:00:00`);
+    const deadline = new Date(`${goal.target_date}T12:00:00`);
+    const daysLeft = Math.max(1, Math.ceil((deadline - today) / 86400000) + 1);
+    const progress = Math.min(100, Math.max(0, (saved / target) * 100));
+    const card = document.createElement("article");
+    card.className = "goal-item";
+
+    const heading = document.createElement("div");
+    heading.className = "goal-item-heading";
+    const title = document.createElement("strong");
+    title.textContent = goal.name;
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
+    const editButton = document.createElement("button");
+    editButton.className = "icon-button";
+    editButton.type = "button";
+    editButton.textContent = "✎";
+    editButton.setAttribute("aria-label", `แก้ไขเป้าหมาย ${goal.name}`);
+    editButton.addEventListener("click", () => editSavingsGoal(goal));
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "icon-button delete-button";
+    deleteButton.type = "button";
+    deleteButton.textContent = "×";
+    deleteButton.setAttribute("aria-label", `ลบเป้าหมาย ${goal.name}`);
+    deleteButton.addEventListener("click", () => {
+      deleteSavingsGoal(goal).catch((error) => showMessage(elements.goalMessage, `ลบเป้าหมายไม่สำเร็จ: ${error.message}`));
+    });
+    actions.append(editButton, deleteButton);
+    heading.append(title, actions);
+
+    const figures = document.createElement("div");
+    figures.className = "goal-figures";
+    const savedText = document.createElement("strong");
+    savedText.textContent = currency.format(saved);
+    const targetText = document.createElement("span");
+    targetText.textContent = `จาก ${currency.format(target)}`;
+    figures.append(savedText, targetText);
+
+    const progressTrack = document.createElement("div");
+    progressTrack.className = "goal-progress-track";
+    progressTrack.setAttribute("role", "progressbar");
+    progressTrack.setAttribute("aria-label", `ความคืบหน้า ${goal.name}`);
+    progressTrack.setAttribute("aria-valuemin", "0");
+    progressTrack.setAttribute("aria-valuemax", "100");
+    progressTrack.setAttribute("aria-valuenow", String(Math.round(progress)));
+    const progressBar = document.createElement("span");
+    progressBar.style.width = `${progress}%`;
+    progressTrack.append(progressBar);
+
+    const deadlineText = document.createElement("p");
+    deadlineText.className = "goal-deadline";
+    deadlineText.textContent = `กำหนด ${formatDate(goal.target_date)}${goal.target_date < getLocalDate() && remaining > 0 ? " · เลยกำหนด" : ""}`;
+    const recommendations = document.createElement("div");
+    recommendations.className = "goal-recommendations";
+    if (remaining === 0) {
+      const completed = document.createElement("strong");
+      completed.className = "goal-complete";
+      completed.textContent = "ถึงเป้าหมายแล้ว";
+      recommendations.append(completed);
+    } else {
+      for (const period of goal.display_periods) {
+        const recommendation = document.createElement("span");
+        const periodAmount = Math.min(remaining, remaining / daysLeft * periodDays[period]);
+        recommendation.textContent = `${periodLabels[period]} ${currency.format(periodAmount)}`;
+        recommendations.append(recommendation);
+      }
+    }
+
+    card.append(heading, figures, progressTrack, deadlineText, recommendations);
+    return card;
+  }));
+  elements.goalEmpty.hidden = savingsGoals.length > 0;
+  setGoalOptions(elements.goalSelect.value);
+}
+
 function createTransactionElement(transaction) {
-  const item = document.createElement("article");
-  item.className = "transaction-item";
+  const item = document.createElement("tr");
   const effectiveType = getEffectiveType(transaction);
   const symbol = document.createElement("span");
   symbol.className = `transaction-symbol${effectiveType === "income" ? " income-symbol" : ""}`;
@@ -518,11 +681,22 @@ function createTransactionElement(transaction) {
   title.textContent = transaction.note || transaction.category;
   const detail = document.createElement("span");
   const assetAction = transaction.type === "asset" ? `${getAssetActionLabel(transaction.asset_action)} · ` : "";
-  detail.textContent = `${assetAction}${transaction.category} · ${formatDate(transaction.transaction_date)}`;
+  const goal = savingsGoals.find((item) => item.id === transaction.goal_id);
+  const goalLabel = goal ? ` · เป้าหมาย ${goal.name}` : "";
+  detail.textContent = `${assetAction}${transaction.category}${goalLabel}`;
   info.append(title, detail);
+  const date = document.createElement("td");
+  date.className = "transaction-date";
+  date.textContent = formatDate(transaction.transaction_date);
+  const description = document.createElement("td");
+  description.className = "transaction-description";
+  description.append(symbol, info);
   const amount = document.createElement("span");
   amount.className = `transaction-amount ${effectiveType === "income" ? "income-text" : "expense-text"}`;
   amount.textContent = `${effectiveType === "income" ? "+" : "−"}${currency.format(Number(transaction.amount))}`;
+  const amountCell = document.createElement("td");
+  amountCell.className = "transaction-amount-cell";
+  amountCell.append(amount);
   const actions = document.createElement("div");
   actions.className = "item-actions";
   const editButton = document.createElement("button");
@@ -540,7 +714,10 @@ function createTransactionElement(transaction) {
     deleteTransaction(transaction).catch((error) => showMessage(elements.transactionMessage, `ลบรายการไม่สำเร็จ: ${error.message}`));
   });
   actions.append(editButton, deleteButton);
-  item.append(symbol, info, amount, actions);
+  const actionsCell = document.createElement("td");
+  actionsCell.className = "transaction-actions-cell";
+  actionsCell.append(actions);
+  item.append(date, description, amountCell, actionsCell);
   return item;
 }
 
@@ -550,6 +727,7 @@ function startEditing(transaction) {
   selectedType = transaction.type;
   elements.typeButtons.forEach((button) => button.classList.toggle("is-active", button.dataset.type === selectedType));
   elements.assetAction.value = transaction.asset_action || "add";
+  setGoalOptions(transaction.goal_id || "");
   updateAssetActionVisibility();
   setCategories(transaction.category);
   elements.amount.value = transaction.amount;
@@ -602,7 +780,9 @@ function createRecurringOccurrenceElement(occurrence) {
   const due = document.createElement("span");
   const isOverdue = occurrence.status === "pending" && occurrence.due_date < getLocalDate();
   const assetAction = template.type === "asset" ? `${getAssetActionLabel(template.asset_action)} · ` : "";
-  due.textContent = `${assetAction}${template.category} · ${occurrence.status === "paid" ? `${settlementLabel} ${formatDate(occurrence.paid_on)}` : `ครบกำหนด ${formatDate(occurrence.due_date)}${isOverdue ? " · ค้างชำระ" : ""}`}`;
+  const goal = savingsGoals.find((item) => item.id === template.goal_id);
+  const goalLabel = goal ? ` · เป้าหมาย ${goal.name}` : "";
+  due.textContent = `${assetAction}${template.category}${goalLabel} · ${occurrence.status === "paid" ? `${settlementLabel} ${formatDate(occurrence.paid_on)}` : `ครบกำหนด ${formatDate(occurrence.due_date)}${isOverdue ? " · ค้างชำระ" : ""}`}`;
   if (isOverdue) due.className = "overdue-text";
   description.append(title, due);
   const amount = document.createElement("span");
@@ -634,7 +814,9 @@ function renderRecurring() {
   const pendingRows = pendingTransactions.map(createPendingTransactionElement);
   const occurrenceRows = occurrences.map(createRecurringOccurrenceElement).filter(Boolean);
   elements.recurringList.replaceChildren(...pendingRows, ...occurrenceRows);
-  const activeTemplates = recurringTemplates.filter((template) => template.active).map(createTemplateElement);
+  const activeTemplates = recurringTemplates
+    .filter((template) => template.active && (!template.end_date || template.end_date >= getLocalDate()))
+    .map(createTemplateElement);
   elements.recurringList.append(...activeTemplates);
   elements.recurringEmpty.hidden = pendingRows.length > 0 || occurrenceRows.length > 0 || activeTemplates.length > 0;
 }
@@ -705,7 +887,10 @@ function createTemplateElement(template) {
   const effectiveType = getEffectiveType(template);
   const typeLabel = effectiveType === "income" ? "รายรับ" : "รายจ่าย";
   const assetAction = template.type === "asset" ? `${getAssetActionLabel(template.asset_action)} · ` : "";
-  detail.textContent = `${assetAction}${typeLabel} · ${template.frequency === "monthly" ? "ทุกเดือน" : "ทุกปี"} · เริ่ม ${formatDate(template.start_date)}`;
+  const goal = savingsGoals.find((item) => item.id === template.goal_id);
+  const goalLabel = goal ? ` · เป้าหมาย ${goal.name}` : "";
+  const endLabel = template.end_date ? ` · สิ้นสุด ${formatDate(template.end_date)}` : "";
+  detail.textContent = `${assetAction}${typeLabel}${goalLabel} · ${template.frequency === "monthly" ? "ทุกเดือน" : "ทุกปี"} · เริ่ม ${formatDate(template.start_date)}${endLabel}`;
   description.append(title, detail);
   const amount = document.createElement("span");
   amount.className = `transaction-amount ${effectiveType === "income" ? "income-text" : "expense-text"}`;
@@ -853,6 +1038,94 @@ async function activateCategory(category) {
   showMessage(elements.settingsMessage, "เปิดใช้หมวดหมู่แล้ว", true);
 }
 
+function resetGoalForm() {
+  elements.goalForm.reset();
+  elements.goalId.value = "";
+  elements.goalSaveButton.textContent = "เพิ่มเป้าหมาย";
+  elements.goalCancelButton.hidden = true;
+  showMessage(elements.goalMessage, "");
+}
+
+function editSavingsGoal(goal) {
+  elements.goalId.value = goal.id;
+  elements.goalName.value = goal.name;
+  elements.goalTarget.value = goal.target_amount;
+  elements.goalDate.value = goal.target_date;
+  elements.goalForm.querySelectorAll('input[name="goal-period"]').forEach((input) => {
+    input.checked = goal.display_periods.includes(input.value);
+  });
+  elements.goalSaveButton.textContent = "บันทึกเป้าหมาย";
+  elements.goalCancelButton.hidden = false;
+  showMessage(elements.goalMessage, "");
+  elements.goalName.focus();
+}
+
+async function deleteSavingsGoal(goal) {
+  if (!window.confirm(`ลบเป้าหมาย "${goal.name}" หรือไม่? ประวัติรายการสินทรัพย์เดิมจะยังอยู่ แต่จะไม่ผูกกับเป้าหมายนี้`)) return;
+  const { error } = await supabaseClient
+    .from("savings_goals")
+    .delete()
+    .eq("id", goal.id)
+    .eq("user_id", currentUser.id);
+  if (error) throw error;
+  if (elements.goalId.value === goal.id) resetGoalForm();
+  try {
+    await loadDashboardData();
+  } catch (loadError) {
+    showMessage(elements.goalMessage, `ลบเป้าหมายแล้ว แต่โหลดข้อมูลใหม่ไม่สำเร็จ: ${loadError.message}`);
+    return;
+  }
+  showMessage(elements.goalMessage, "ลบเป้าหมายแล้ว", true);
+}
+
+elements.goalForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  showMessage(elements.goalMessage, "");
+  const name = elements.goalName.value.trim();
+  const periods = [...elements.goalForm.querySelectorAll('input[name="goal-period"]:checked')]
+    .map((input) => input.value);
+  if (!name || name.length > 60) {
+    showMessage(elements.goalMessage, "ชื่อเป้าหมายต้องมี 1–60 ตัวอักษร");
+    return;
+  }
+  if (periods.length === 0) {
+    showMessage(elements.goalMessage, "เลือกช่วงเวลาคำแนะนำอย่างน้อย 1 ช่วง");
+    return;
+  }
+
+  const goalId = elements.goalId.value;
+  const record = {
+    name,
+    target_amount: Number(elements.goalTarget.value),
+    target_date: elements.goalDate.value,
+    display_periods: periods,
+  };
+  setBusy(elements.goalSaveButton, true, "กำลังบันทึก...", goalId ? "บันทึกเป้าหมาย" : "เพิ่มเป้าหมาย");
+  let saved = false;
+  try {
+    const query = goalId
+      ? supabaseClient.from("savings_goals").update(record).eq("id", goalId).eq("user_id", currentUser.id)
+      : supabaseClient.from("savings_goals").insert({ ...record, user_id: currentUser.id });
+    const { error } = await query;
+    if (error) throw error;
+    saved = true;
+    resetGoalForm();
+  } catch (error) {
+    showMessage(elements.goalMessage, `บันทึกเป้าหมายไม่สำเร็จ: ${error.message}`);
+  } finally {
+    setBusy(elements.goalSaveButton, false, "", elements.goalId.value ? "บันทึกเป้าหมาย" : "เพิ่มเป้าหมาย");
+  }
+  if (!saved) return;
+  try {
+    await loadDashboardData();
+    showMessage(elements.goalMessage, goalId ? "บันทึกเป้าหมายแล้ว" : "เพิ่มเป้าหมายแล้ว", true);
+  } catch (error) {
+    showMessage(elements.goalMessage, `บันทึกเป้าหมายแล้ว แต่โหลดข้อมูลใหม่ไม่สำเร็จ: ${error.message}`);
+  }
+});
+
+elements.goalCancelButton.addEventListener("click", resetGoalForm);
+
 elements.authSwitchButton.addEventListener("click", () => {
   isSignUp = !isSignUp;
   elements.authTitle.textContent = isSignUp ? "สร้างบัญชีใหม่" : "เข้าสู่ระบบ";
@@ -904,19 +1177,30 @@ elements.typeButtons.forEach((button) => button.addEventListener("click", () => 
 
 elements.recurringToggle.addEventListener("change", () => {
   elements.recurringOptions.hidden = !elements.recurringToggle.checked;
+  updateRecurrenceEndMonthMinimum();
 });
+
+elements.transactionDate.addEventListener("change", updateRecurrenceEndMonthMinimum);
 
 elements.transactionForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   showMessage(elements.transactionMessage, "");
   const wasEditing = Boolean(editingId);
   const isRecurring = elements.recurringToggle.checked && !wasEditing;
+  const recurrenceEndMonth = elements.recurrenceEndMonth.value;
+  const startMonth = elements.transactionDate.value.slice(0, 7);
+  if (isRecurring && recurrenceEndMonth && recurrenceEndMonth < startMonth) {
+    showMessage(elements.transactionMessage, "เดือน/ปีสิ้นสุดต้องไม่ก่อนเดือน/ปีเริ่มต้น");
+    elements.recurrenceEndMonth.focus();
+    return;
+  }
   const idleText = wasEditing ? "บันทึกการแก้ไข" : isRecurring ? "สร้างรายการประจำ" : "บันทึกรายการ";
   setBusy(elements.saveButton, true, "กำลังบันทึก...", idleText);
   const record = {
     user_id: currentUser.id,
     type: selectedType,
     asset_action: selectedType === "asset" ? elements.assetAction.value : null,
+    goal_id: selectedType === "asset" ? elements.goalSelect.value || null : null,
     is_settled: selectedType === "asset"
       || (elements.transactionDate.value <= getLocalDate() && (!wasEditing || editingIsSettled)),
     amount: Number(elements.amount.value),
@@ -928,12 +1212,14 @@ elements.transactionForm.addEventListener("submit", async (event) => {
   try {
     if (isRecurring) {
       const startDate = record.transaction_date;
+      const endDate = recurrenceEndMonth ? monthEndDate(recurrenceEndMonth) : null;
       const template = { ...record };
       delete template.transaction_date;
       delete template.is_settled;
       const { error } = await supabaseClient.from("recurring_transactions").insert({
         ...template,
         start_date: startDate,
+        end_date: endDate,
         frequency: elements.recurrenceFrequency.value,
       });
       if (error) throw error;
@@ -953,6 +1239,7 @@ elements.transactionForm.addEventListener("submit", async (event) => {
     setBusy(elements.saveButton, false, "", wasEditing ? "บันทึกการแก้ไข" : "บันทึกรายการ");
   }
   if (!saved) return;
+  transactionPage = 1;
   await loadDashboardData().catch((error) => showMessage(elements.transactionMessage, `บันทึกแล้ว แต่โหลดข้อมูลใหม่ไม่สำเร็จ: ${error.message}`));
 });
 
@@ -961,15 +1248,31 @@ elements.cancelEditButton.addEventListener("click", () => {
   resetForm();
 });
 
+elements.transactionPreviousPage.addEventListener("click", () => {
+  if (transactionPage <= 1) return;
+  transactionPage -= 1;
+  renderTransactions();
+});
+
+elements.transactionNextPage.addEventListener("click", () => {
+  const pageCount = Math.ceil(transactions.filter((item) => item.is_settled).length / TRANSACTIONS_PER_PAGE);
+  if (transactionPage >= pageCount) return;
+  transactionPage += 1;
+  renderTransactions();
+});
+
 elements.monthPicker.addEventListener("change", () => {
+  transactionPage = 1;
   loadDashboardData().catch((error) => showMessage(elements.transactionMessage, `โหลดรายการไม่สำเร็จ: ${error.message}`));
 });
 
 elements.yearPicker.addEventListener("change", () => {
+  transactionPage = 1;
   loadDashboardData().catch((error) => showMessage(elements.transactionMessage, `โหลดรายการไม่สำเร็จ: ${error.message}`));
 });
 
 elements.periodMode.addEventListener("change", () => {
+  transactionPage = 1;
   applyPeriodMode();
   loadDashboardData().catch((error) => showMessage(elements.transactionMessage, `โหลดรายการไม่สำเร็จ: ${error.message}`));
 });

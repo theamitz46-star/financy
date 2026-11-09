@@ -109,7 +109,7 @@ button { cursor: pointer; }
 .asset-card .summary-label { color: #866600; }
 :root[data-theme="dark"] .summary-hint-row strong { color: #dfe7f1; }
 .content-grid { display: grid; grid-template-columns: 365px 1fr; align-items: start; gap: 18px; margin-top: 20px; }
-.transaction-card, .history-card { padding: 23px; }
+.transaction-card, .history-card { min-width: 0; padding: 23px; }
 .section-heading { margin-bottom: 14px; }
 .section-heading h2 { font-size: 17px; }
 .type-toggle { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; margin: 17px 0; border-radius: 9px; background: var(--subtle-bg); padding: 4px; }
@@ -128,8 +128,22 @@ button { cursor: pointer; }
 .recurring-options { margin-top: 8px; }
 .recurring-options .field-label { margin-top: 10px; }
 .history-heading { display: flex; justify-content: space-between; align-items: center; }
-.transaction-list { display: grid; }
-.transaction-item { min-height: 68px; display: grid; grid-template-columns: 40px 1fr auto auto; align-items: center; gap: 12px; border-top: 1px solid #eef1f5; }
+.transaction-table-wrap { overflow-x: auto; }
+.transaction-table { width: 100%; min-width: 560px; border-collapse: collapse; text-align: left; }
+.transaction-table th { padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.transaction-table td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.transaction-table tbody tr:last-child td { border-bottom: 0; }
+.transaction-table tbody tr:hover { background: color-mix(in srgb, var(--subtle-bg) 55%, transparent); }
+.transaction-table .amount-column,
+.transaction-table .transaction-amount-cell { text-align: right; }
+.transaction-table .actions-column,
+.transaction-table .transaction-actions-cell { width: 76px; text-align: right; }
+.transaction-actions-cell .item-actions { justify-content: flex-end; }
+.transaction-pagination { display: flex; justify-content: flex-end; align-items: center; gap: 12px; padding-top: 12px; color: var(--muted); font-size: 12px; }
+.pagination-button { min-height: 34px; padding: 0 10px; }
+.pagination-button:disabled { cursor: default; opacity: .45; }
+.transaction-date { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.transaction-description { display: flex; align-items: center; gap: 10px; }
 .transaction-symbol { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 12px; background: #f2f5f8; color: #728096; font-size: 14px; }
 .transaction-symbol.income-symbol { background: color-mix(in srgb, var(--green) 12%, white); color: var(--green); }
 .transaction-info strong { display: block; overflow: hidden; max-width: 260px; color: #354156; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
@@ -145,8 +159,9 @@ button { cursor: pointer; }
 .empty-icon { margin-bottom: 3px; color: #bdc7d3; font-size: 30px; }
 .empty-state strong { color: #5a687c; font-size: 14px; }
 .privacy-note { margin: 16px 2px 0; color: #9aa5b4; font-size: 11px; text-align: center; }
-.recurring-card, .settings-card { margin-top: 18px; padding: 23px; }
-.asset-holdings-card { margin-top: 18px; padding: 23px; }
+.secondary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.recurring-card, .asset-holdings-card { min-width: 0; padding: 23px; }
+.settings-card, .goals-card { margin-top: 18px; padding: 23px; }
 .asset-holdings-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
 .asset-holding-item { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #f0e5c4; border-radius: 12px; background: #fffdf7; padding: 13px 15px; }
 .asset-holding-description { min-width: 0; }
@@ -154,6 +169,26 @@ button { cursor: pointer; }
 .asset-holding-description span { display: block; margin-top: 3px; color: #9aa5b4; font-size: 11px; }
 .asset-holding-amount { color: #a17b07; font-size: 13px; white-space: nowrap; }
 .asset-holdings-empty { margin: 0; padding: 16px 0 4px; text-align: center; }
+.goal-form { border-bottom: 1px solid var(--border); padding-bottom: 18px; }
+.goal-form-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.goal-form-fields .field-label { margin-top: 0; }
+.goal-period-options { display: flex; flex-wrap: wrap; gap: 12px 18px; margin: 16px 0 0; border: 0; padding: 0; color: #647287; font-size: 12px; }
+.goal-period-options legend { margin-bottom: 8px; color: #46546a; font-size: 12px; font-weight: 600; }
+.goal-period-options label { display: inline-flex; align-items: center; gap: 5px; }
+.goal-period-options input { accent-color: var(--green); }
+.goal-form-actions { display: flex; gap: 8px; margin-top: 14px; }
+.goal-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); gap: 12px; margin-top: 16px; }
+.goal-item { min-width: 0; border: 1px solid #dfeee8; border-radius: 13px; background: #f9fcfa; padding: 15px; }
+.goal-item-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.goal-item-heading > strong { overflow: hidden; color: #354156; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.goal-figures { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin-top: 11px; }
+.goal-figures strong { color: var(--green); font-size: 18px; }
+.goal-figures span, .goal-deadline { color: #8793a3; font-size: 11px; }
+.goal-progress-track { height: 7px; overflow: hidden; margin-top: 9px; border-radius: 99px; background: #e7eee9; }
+.goal-progress-track span { display: block; height: 100%; border-radius: inherit; background: var(--green); }
+.goal-deadline { margin: 8px 0 0; }
+.goal-recommendations { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+.goal-recommendations span, .goal-complete { border-radius: 6px; background: color-mix(in srgb, var(--green) 10%, white); padding: 5px 7px; color: var(--green-dark); font-size: 11px; font-weight: 600; }
 .recurring-list { display: grid; }
 .recurring-item, .template-item { min-height: 67px; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 12px; border-top: 1px solid var(--border); }
 .pending-transaction-item { grid-template-columns: 24px minmax(0, 1fr) auto auto; }
@@ -215,9 +250,17 @@ button { cursor: pointer; }
 :root[data-theme="dark"] .asset-holding-item { border-color: var(--border); background: var(--surface); }
 :root[data-theme="dark"] .asset-holding-description strong,
 :root[data-theme="dark"] .asset-holding-amount { color: #f0c75d; }
+:root[data-theme="dark"] .goal-item { border-color: var(--border); background: var(--surface); }
+:root[data-theme="dark"] .goal-item-heading > strong { color: var(--text); }
+:root[data-theme="dark"] .goal-period-options,
+:root[data-theme="dark"] .goal-period-options legend { color: #c0cad8; }
+:root[data-theme="dark"] .goal-progress-track { background: #344154; }
+:root[data-theme="dark"] .goal-recommendations span,
+:root[data-theme="dark"] .goal-complete { background: color-mix(in srgb, var(--green) 20%, var(--surface)); color: #8ed3b9; }
 :root[data-theme="dark"] .input,
 :root[data-theme="dark"] select { border-color: var(--border); color: var(--text); }
-:root[data-theme="dark"] .transaction-item,
+:root[data-theme="dark"] .transaction-table th,
+:root[data-theme="dark"] .transaction-table td,
 :root[data-theme="dark"] .recurring-item,
 :root[data-theme="dark"] .template-item,
 :root[data-theme="dark"] .category-item { border-color: var(--border); }
@@ -238,12 +281,9 @@ button { cursor: pointer; }
 
 @media (max-width: 850px) {
   .auth-layout { grid-template-columns: 1fr 370px; gap: 35px; padding-right: 0; padding-left: 0; }
-  .content-grid { grid-template-columns: 320px 1fr; }
+  .content-grid { grid-template-columns: minmax(0, 1fr); }
   .summary-grid { grid-template-columns: repeat(3, 1fr); }
-  .transaction-item { grid-template-columns: 36px 1fr auto; gap: 9px; }
   .transaction-symbol { width: 35px; height: 35px; }
-  .item-actions { grid-column: 2 / -1; justify-self: end; margin-top: -8px; }
-  .transaction-item { padding: 8px 0; }
 }
 
 @media (max-width: 680px) {
@@ -266,18 +306,19 @@ button { cursor: pointer; }
   .summary-amount { font-size: 23px; }
   .content-grid { grid-template-columns: 1fr; gap: 14px; margin-top: 14px; }
   .transaction-card, .history-card { padding: 19px; }
-  .recurring-card, .settings-card, .asset-holdings-card { padding: 19px; }
+  .secondary-grid { grid-template-columns: 1fr; gap: 14px; margin-top: 14px; }
+  .recurring-card, .settings-card, .asset-holdings-card, .goals-card { padding: 19px; }
   .asset-holdings-list { grid-template-columns: 1fr; }
-  .transaction-item { grid-template-columns: 38px 1fr auto auto; }
-  .item-actions { grid-column: auto; margin-top: 0; }
+  .goal-form-fields { grid-template-columns: 1fr; gap: 12px; }
+  .goal-list { grid-template-columns: 1fr; }
   .settings-grid { grid-template-columns: 1fr; gap: 22px; }
 }
 
 @media (max-width: 390px) {
   .dashboard-heading { flex-direction: column; align-items: stretch; }
-  .month-picker .input { width: 100%; }
-  .transaction-item { grid-template-columns: 34px 1fr auto; gap: 8px; }
-  .item-actions { grid-column: 2 / -1; justify-self: end; margin-top: -7px; }
+  .view-controls { width: 100%; gap: 8px; }
+  .period-picker, .month-picker { min-width: 0; flex: 1; }
+  .period-picker .input, .month-picker .input { width: 100%; min-width: 0; }
   .category-form { grid-template-columns: 1fr auto; }
   .category-form select { grid-column: 1 / -1; }
   .category-columns { gap: 10px; }

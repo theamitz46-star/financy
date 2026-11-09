@@ -137,6 +137,10 @@
                   <option value="add">นำเข้าสินทรัพย์ (นับเป็นรายจ่าย)</option>
                   <option value="withdraw">ถอน/ขายสินทรัพย์ (นับเป็นรายรับ)</option>
                 </select>
+                <label class="field-label" for="goal-select">เป้าหมาย <span class="optional">(ไม่บังคับ)</span></label>
+                <select id="goal-select" class="input">
+                  <option value="">ไม่ระบุเป้าหมาย</option>
+                </select>
               </div>
               <label class="field-label" for="amount">จำนวนเงิน (บาท)</label>
               <div class="amount-wrap"><span>฿</span><input id="amount" class="input amount-input" type="number" min="0.01" step="0.01" placeholder="0.00" required></div>
@@ -162,7 +166,10 @@
                   <option value="monthly">ทุกเดือน</option>
                   <option value="yearly">ทุกปี</option>
                 </select>
-                <p class="helper-text">ระบบจะสร้างยอดตามวันที่กำหนด รายการที่ยังไม่ติ๊กจ่ายจะแสดงเป็นยอดค้าง</p>
+                <label class="field-label" for="recurrence-end-month">เดือน/ปีที่ให้เกิดรอบสุดท้าย <span class="optional">(ไม่บังคับ)</span></label>
+                <input id="recurrence-end-month" class="input" type="month">
+                <p class="helper-text">เว้นว่างหากไม่ต้องการกำหนดวันสิ้นสุด รอบสุดท้ายจะไม่เกินเดือน/ปีที่เลือก</p>
+                <p class="helper-text">รายการที่ยังไม่ติ๊กจ่ายจะแสดงเป็นยอดค้าง</p>
               </div>
               <p id="transaction-message" class="form-message" role="status" aria-live="polite"></p>
               <div class="form-actions">
@@ -179,7 +186,24 @@
                 <p id="transaction-count" class="muted">0 รายการ</p>
               </div>
             </div>
-            <div id="transaction-list" class="transaction-list"></div>
+            <div id="transaction-table-wrap" class="transaction-table-wrap" hidden>
+              <table class="transaction-table">
+                <thead>
+                  <tr>
+                    <th scope="col">วันที่</th>
+                    <th scope="col">รายละเอียด</th>
+                    <th scope="col" class="amount-column">จำนวนเงิน</th>
+                    <th scope="col" class="actions-column">จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody id="transaction-list"></tbody>
+              </table>
+            </div>
+            <nav id="transaction-pagination" class="transaction-pagination" aria-label="หน้ารายการ" hidden>
+              <button id="transaction-previous-page" class="button button-quiet pagination-button" type="button">ก่อนหน้า</button>
+              <span id="transaction-page-status" aria-live="polite"></span>
+              <button id="transaction-next-page" class="button button-quiet pagination-button" type="button">ถัดไป</button>
+            </nav>
             <div id="empty-state" class="empty-state">
               <span class="empty-icon" aria-hidden="true">☷</span>
               <strong>ยังไม่มีรายการ</strong>
@@ -188,30 +212,75 @@
           </section>
         </div>
 
-        <section class="card recurring-card">
-          <div class="section-heading history-heading">
-            <div>
-              <h2>รายการประจำและยอดค้าง</h2>
-              <p class="muted">รายการรายรับ/รายจ่ายที่ตั้งวันล่วงหน้าจะเป็นยอดค้างอัตโนมัติ ติ๊กเมื่อรับเงินหรือชำระแล้ว</p>
+        <div class="secondary-grid">
+          <section class="card recurring-card">
+            <div class="section-heading history-heading">
+              <div>
+                <h2>รายการประจำและยอดค้าง</h2>
+                <p class="muted">รายการรายรับ/รายจ่ายที่ตั้งวันล่วงหน้าจะเป็นยอดค้างอัตโนมัติ ติ๊กเมื่อรับเงินหรือชำระแล้ว</p>
+              </div>
             </div>
-          </div>
-          <div id="recurring-list" class="recurring-list"></div>
-          <div id="recurring-empty" class="empty-state compact-empty">
-            <strong>ไม่มีรายการประจำหรือยอดค้างในช่วงนี้</strong>
-            <span>เพิ่มรายการประจำจากแบบฟอร์มด้านบนได้เลย</span>
-          </div>
-          <p id="recurring-message" class="form-message" role="status" aria-live="polite"></p>
-        </section>
+            <div id="recurring-list" class="recurring-list"></div>
+            <div id="recurring-empty" class="empty-state compact-empty">
+              <strong>ไม่มีรายการประจำหรือยอดค้างในช่วงนี้</strong>
+              <span>เพิ่มรายการประจำจากแบบฟอร์มด้านบนได้เลย</span>
+            </div>
+            <p id="recurring-message" class="form-message" role="status" aria-live="polite"></p>
+          </section>
 
-        <section class="card asset-holdings-card">
+          <section class="card asset-holdings-card">
+            <div class="section-heading">
+              <div>
+                <h2>สินทรัพย์ที่มีอยู่</h2>
+                <p class="muted">ยอดนำเข้าสินทรัพย์หักยอดถอนหรือขายแล้ว</p>
+              </div>
+            </div>
+            <div id="asset-holdings-list" class="asset-holdings-list"></div>
+            <p id="asset-holdings-empty" class="muted asset-holdings-empty" hidden>ยังไม่มีสินทรัพย์ที่มียอดคงเหลือ บันทึกรายการนำเข้าสินทรัพย์เพื่อเริ่มต้น</p>
+          </section>
+        </div>
+
+        <section class="card goals-card">
           <div class="section-heading">
             <div>
-              <h2>สินทรัพย์ที่มีอยู่</h2>
-              <p class="muted">ยอดนำเข้าสินทรัพย์หักยอดถอนหรือขายแล้ว</p>
+              <h2>เป้าหมายการออม</h2>
+              <p class="muted">ตั้งยอดและวันครบกำหนด แล้วบันทึกการออมหรือถอนผ่านรายการสินทรัพย์</p>
             </div>
           </div>
-          <div id="asset-holdings-list" class="asset-holdings-list"></div>
-          <p id="asset-holdings-empty" class="muted asset-holdings-empty" hidden>ยังไม่มีสินทรัพย์ที่มียอดคงเหลือ บันทึกรายการนำเข้าสินทรัพย์เพื่อเริ่มต้น</p>
+          <form id="goal-form" class="goal-form">
+            <input id="goal-id" type="hidden">
+            <div class="goal-form-fields">
+              <div>
+                <label class="field-label" for="goal-name">ชื่อเป้าหมาย</label>
+                <input id="goal-name" class="input" type="text" maxlength="60" placeholder="เช่น เงินสำรองฉุกเฉิน" required>
+              </div>
+              <div>
+                <label class="field-label" for="goal-target">ยอดเงินเป้าหมาย (บาท)</label>
+                <input id="goal-target" class="input" type="number" min="0.01" step="0.01" placeholder="0.00" required>
+              </div>
+              <div>
+                <label class="field-label" for="goal-date">วันที่ต้องการให้ถึงเป้าหมาย</label>
+                <input id="goal-date" class="input" type="date" required>
+              </div>
+            </div>
+            <fieldset class="goal-period-options">
+              <legend>แสดงคำแนะนำการออม</legend>
+              <label><input type="checkbox" name="goal-period" value="day" checked> รายวัน</label>
+              <label><input type="checkbox" name="goal-period" value="week"> รายสัปดาห์</label>
+              <label><input type="checkbox" name="goal-period" value="month" checked> รายเดือน</label>
+              <label><input type="checkbox" name="goal-period" value="year"> รายปี</label>
+            </fieldset>
+            <div class="goal-form-actions">
+              <button id="goal-save-button" class="button button-primary" type="submit">เพิ่มเป้าหมาย</button>
+              <button id="goal-cancel-button" class="button button-quiet" type="button" hidden>ยกเลิก</button>
+            </div>
+          </form>
+          <p id="goal-message" class="form-message" role="status" aria-live="polite"></p>
+          <div id="goal-list" class="goal-list"></div>
+          <div id="goal-empty" class="empty-state compact-empty">
+            <strong>ยังไม่มีเป้าหมายการออม</strong>
+            <span>เพิ่มเป้าหมายแรก แล้วบันทึกรายการสินทรัพย์เพื่อเริ่มออม</span>
+          </div>
         </section>
 
         <section class="card settings-card">

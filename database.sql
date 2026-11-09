@@ -5,6 +5,7 @@ create table if not exists public.transactions (
   user_id uuid not null references auth.users(id) on delete cascade,
   type text not null check (type in ('income', 'expense', 'asset')),
   asset_action text,
+  goal_id uuid,
   amount numeric(12, 2) not null check (amount > 0),
   category text not null,
   note text,
@@ -12,6 +13,43 @@ create table if not exists public.transactions (
   is_settled boolean not null default true,
   created_at timestamptz not null default now()
 );
+
+create table if not exists public.savings_goals (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null check (length(trim(name)) between 1 and 60),
+  target_amount numeric(12, 2) not null check (target_amount > 0),
+  target_date date not null,
+  display_periods text[] not null default array['day', 'month']::text[]
+    check (
+      cardinality(display_periods) > 0
+      and display_periods <@ array['day', 'week', 'month', 'year']::text[]
+    ),
+  created_at timestamptz not null default now()
+);
+
+alter table public.transactions
+  add column if not exists goal_id uuid;
+
+alter table public.transactions
+  drop constraint if exists transactions_goal_id_fkey;
+
+alter table public.transactions
+  add constraint transactions_goal_id_fkey
+  foreign key (goal_id) references public.savings_goals(id) on delete set null;
+
+alter table public.transactions
+  drop constraint if exists transactions_goal_type_check;
+
+alter table public.transactions
+  drop constraint if exists transactions_goal_type_check;
+
+alter table public.transactions
+  add constraint transactions_goal_type_check
+  check (goal_id is null or type = 'asset');
+
+create index if not exists transactions_goal_id_idx
+on public.transactions (goal_id);
 
 do $$
 begin
@@ -80,7 +118,18 @@ create policy "Users can insert own transactions"
 on public.transactions
 for insert
 to authenticated
-with check (auth.uid() = user_id);
+with check (
+  auth.uid() = user_id
+  and (
+    goal_id is null
+    or exists (
+      select 1
+      from public.savings_goals
+      where savings_goals.id = transactions.goal_id
+        and savings_goals.user_id = auth.uid()
+    )
+  )
+);
 
 drop policy if exists "Users can update own transactions"
 on public.transactions;
@@ -89,7 +138,18 @@ on public.transactions
 for update
 to authenticated
 using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
+with check (
+  auth.uid() = user_id
+  and (
+    goal_id is null
+    or exists (
+      select 1
+      from public.savings_goals
+      where savings_goals.id = transactions.goal_id
+        and savings_goals.user_id = auth.uid()
+    )
+  )
+);
 
 drop policy if exists "Users can delete own transactions"
 on public.transactions;
@@ -131,14 +191,46 @@ create table if not exists public.recurring_transactions (
   user_id uuid not null references auth.users(id) on delete cascade,
   type text not null check (type in ('income', 'expense', 'asset')),
   asset_action text,
+  goal_id uuid,
   amount numeric(12, 2) not null check (amount > 0),
   category text not null,
   note text,
   frequency text not null check (frequency in ('monthly', 'yearly')),
   start_date date not null,
+  end_date date,
   active boolean not null default true,
   created_at timestamptz not null default now()
 );
+
+alter table public.recurring_transactions
+  add column if not exists end_date date;
+
+alter table public.recurring_transactions
+  drop constraint if exists recurring_transactions_end_date_check;
+
+alter table public.recurring_transactions
+  add constraint recurring_transactions_end_date_check
+  check (end_date is null or end_date >= start_date);
+
+alter table public.recurring_transactions
+  add column if not exists goal_id uuid;
+
+alter table public.recurring_transactions
+  drop constraint if exists recurring_transactions_goal_id_fkey;
+
+alter table public.recurring_transactions
+  add constraint recurring_transactions_goal_id_fkey
+  foreign key (goal_id) references public.savings_goals(id) on delete set null;
+
+alter table public.recurring_transactions
+  drop constraint if exists recurring_transactions_goal_type_check;
+
+alter table public.recurring_transactions
+  drop constraint if exists recurring_transactions_goal_type_check;
+
+alter table public.recurring_transactions
+  add constraint recurring_transactions_goal_type_check
+  check (goal_id is null or type = 'asset');
 
 alter table public.recurring_transactions
   drop constraint if exists recurring_transactions_type_check;
@@ -188,11 +280,13 @@ on public.recurring_occurrences (user_id, due_date, status);
 
 alter table public.user_categories enable row level security;
 alter table public.user_preferences enable row level security;
+alter table public.savings_goals enable row level security;
 alter table public.recurring_transactions enable row level security;
 alter table public.recurring_occurrences enable row level security;
 
 grant select, insert, update, delete on public.user_categories to authenticated;
 grant select, insert, update, delete on public.user_preferences to authenticated;
+grant select, insert, update, delete on public.savings_goals to authenticated;
 grant select, insert, update, delete on public.recurring_transactions to authenticated;
 grant select, insert, update, delete on public.recurring_occurrences to authenticated;
 
@@ -208,11 +302,28 @@ for all to authenticated
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
 
+drop policy if exists "Users manage own savings goals" on public.savings_goals;
+create policy "Users manage own savings goals" on public.savings_goals
+for all to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
 drop policy if exists "Users manage own recurring transactions" on public.recurring_transactions;
 create policy "Users manage own recurring transactions" on public.recurring_transactions
 for all to authenticated
 using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
+with check (
+  auth.uid() = user_id
+  and (
+    goal_id is null
+    or exists (
+      select 1
+      from public.savings_goals
+      where savings_goals.id = recurring_transactions.goal_id
+        and savings_goals.user_id = auth.uid()
+    )
+  )
+);
 
 drop policy if exists "Users manage own recurring occurrences" on public.recurring_occurrences;
 create policy "Users manage own recurring occurrences" on public.recurring_occurrences
@@ -266,11 +377,12 @@ begin
     raise exception 'Recurring transaction not found';
   end if;
 
-  insert into public.transactions (user_id, type, asset_action, amount, category, note, transaction_date)
+  insert into public.transactions (user_id, type, asset_action, goal_id, amount, category, note, transaction_date)
   values (
     auth.uid(),
     v_recurring.type,
     v_recurring.asset_action,
+    v_recurring.goal_id,
     v_recurring.amount,
     v_recurring.category,
     v_recurring.note,
